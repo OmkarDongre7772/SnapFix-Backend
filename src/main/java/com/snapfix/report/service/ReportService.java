@@ -15,6 +15,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.snapfix.auth.security.CustomUserDetails;
 import com.snapfix.geo.util.GeoUtil;
+import com.snapfix.notification.entity.NotificationType;
+import com.snapfix.notification.service.NotificationService;
 import com.snapfix.report.dto.ReportRequest;
 import com.snapfix.report.dto.ReportResponse;
 import com.snapfix.report.entity.Report;
@@ -23,6 +25,7 @@ import com.snapfix.report.entity.ReportSupport;
 import com.snapfix.report.repository.ReportRepository;
 import com.snapfix.report.repository.ReportSupportRepository;
 import com.snapfix.storage.service.StorageService;
+import com.snapfix.user.service.UserService;
 
 import jakarta.transaction.Transactional;
 
@@ -32,14 +35,23 @@ public class ReportService {
     private final ReportRepository reportRepository;
     private final ReportSupportRepository reportSupportRepository;
     private final StorageService storageService;
+    private final UserService userService;
+    private final NotificationService notificationService;
 
     public ReportService(ReportRepository reportRepository,
             StorageService storageService,
-            ReportSupportRepository reportSupportRepository) {
+            ReportSupportRepository reportSupportRepository,
+            UserService userService,
+            NotificationService notificationService) {
         this.reportRepository = reportRepository;
         this.storageService = storageService;
         this.reportSupportRepository = reportSupportRepository;
+        this.userService = userService;
+        this.notificationService = notificationService;
     }
+
+
+    // Create Report
 
     @Transactional
     @PreAuthorize("hasRole('CITIZEN')")
@@ -58,6 +70,10 @@ public class ReportService {
         if (existing != null) {
             addSupport(existing, citizenId, "You already reported this issue");
             Report saved = reportRepository.save(existing);
+            notificationService.createNotification(
+                    userService.getUserById(existing.getCitizenId()),
+                    NotificationType.REPORT_SUPPORTED,
+                    "Someone supported your " + existing.getCategory() + " report");
             return mapToResponse(saved, "Existing report found - your support has been added");
         }
 
@@ -73,8 +89,18 @@ public class ReportService {
         report.setStatus(ReportStatus.CREATED);
         report.setSupportCount(1);
 
+        // Saving the Report
         Report saved = reportRepository.save(report);
+
+        // Incrementing the Submitted Reports of the Citizen
+        userService.incrementReportSubmitted(citizenId);
+
+        // Adding the support by the citizen to the report in Support's Table
         createSupport(saved.getId(), citizenId, "Already supported");
+        notificationService.createNotification(
+                userService.getUserById(citizenId),
+                NotificationType.REPORT_CREATED,
+                "Your " + saved.getCategory() + " report has been created successfully");
 
         return mapToResponse(saved, "Report created successfully");
     }
@@ -94,6 +120,10 @@ public class ReportService {
 
         addSupport(report, getCurrentUserId(), "Already supported");
         Report savedReport = reportRepository.save(report);
+        notificationService.createNotification(
+                userService.getUserById(savedReport.getCitizenId()),
+                NotificationType.REPORT_SUPPORTED,
+                "Someone supported your " + savedReport.getCategory() + " report");
 
         return mapToResponse(savedReport, "Support added successfully");
     }

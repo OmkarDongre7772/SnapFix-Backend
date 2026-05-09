@@ -1,6 +1,7 @@
 package com.snapfix.user.service;
 
 import java.util.ArrayList;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,14 @@ public class UserService {
         this.workerProfileRepository = workerProfileRepository;
     }
 
+    public void incrementReportSubmitted(UUID userId){
+        int updatedRows = citizenProfileRepository.incrementReportsSubmitted(userId);
+
+        if(updatedRows == 0){
+            throw new  IllegalArgumentException("Citizen Profile Not Found");
+        }
+    }
+
     @Transactional
     public UserResponse getCurrentUser(String email) {
 
@@ -64,6 +73,18 @@ public class UserService {
         response.setProfile(profile);
         return response;
     }
+
+    @Transactional
+    public User getCurrentUser(UUID id) {
+        return getUserById(id);
+    }
+
+    public User getUserById(UUID id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException("User Not Found!"));
+    }
+
+//          DTO's [Data Transfer Objects]
 
     @Transactional
     public ProfileDTO updateProfile(String email, ProfileUpdateDto dto) {
@@ -123,5 +144,6 @@ public class UserService {
         return dto;
 
     }
+
 }
 

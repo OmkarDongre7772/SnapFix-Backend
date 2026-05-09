@@ -3,6 +3,10 @@ target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+*.log
+compile_errors.txt
+test_output.log
+
 
 ### STS ###
 .apt_generated

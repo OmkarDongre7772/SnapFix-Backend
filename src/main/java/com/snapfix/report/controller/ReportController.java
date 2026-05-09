@@ -14,7 +14,6 @@ import com.snapfix.report.dto.ReportResponse;
 import com.snapfix.report.entity.Category;
 import com.snapfix.report.service.ReportService;
 
-import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/reports")

@@ -1,0 +1,798 @@
+SnapFix Backend - Current Project Report and Issues Log
+Generated: 2026-05-10
+
+============================================================
+1. Current Project Status
+============================================================
+
+Project:
+SnapFix Backend, a Spring Boot backend for civic infrastructure reporting.
+
+Current release:
+Release 1 - Civic Reporting Foundation.
+
+Completed phases:
+- Phase 1 - Platform Foundation
+- Phase 2 - Identity and User System
+- Phase 3 - Civic Report System
+- Phase 4 - Discovery and Notifications
+
+Current release status:
+Release 1 core backend is implemented and test-verified.
+
+Repository documentation status:
+- claude.md reflects the current Release 1 Phase 4 implementation.
+- README.md has been added for GitHub-facing Release 1 documentation.
+- PROJECT_STATUS_AND_ISSUES_REPORT.txt is the current engineering status and issue log.
+
+Latest verified command:
+mvn clean test
+
+Latest result:
+Tests run: 30, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+
+Verification note:
+The automated backend test suite passes locally with Docker Desktop/Testcontainers available.
+A full docker-compose runtime smoke test is still recommended before tagging Release 1.
+
+Main backend technologies:
+- Java 21
+- Spring Boot 4.0.3
+- Spring Security
+- Spring Data JPA
+- PostgreSQL + PostGIS
+- Hibernate Spatial
+- Cloudinary
+- Testcontainers
+- JUnit 5
+
+============================================================
+2. How The Project Currently Works
+============================================================
+
+2.1 Startup and Configuration
+
+The backend starts as a Spring Boot application from:
+src/main/java/com/snapfix/SnapfixApplication.java
+
+Scheduling is enabled for token blacklist cleanup.
+
+Runtime configuration is loaded from application.properties and environment variables.
+Inside Docker, the backend connects to PostgreSQL using the Docker service hostname:
+jdbc:postgresql://postgres:5432/snapfix
+
+PostgreSQL is run with PostGIS through docker-compose.
+
+2.2 Authentication Flow
+
+Register:
+POST /auth/register
+
+The user submits email, password, role and name.
+The password is BCrypt-hashed.
+The user row is created.
+Depending on role, either CitizenProfile or WorkerProfile is created.
+
+Login:
+POST /auth/login
+
+The backend validates credentials.
+It generates:
+- Access token, valid for 15 minutes
+- Refresh token, valid for 7 days
+
+Existing refresh tokens for the user are revoked during login.
+New refresh token is persisted in the refresh_tokens table.
+
+Refresh:
+POST /auth/refresh
+
+The endpoint currently accepts the raw refresh token in the request body.
+The old refresh token is revoked.
+A new access token and refresh token are generated.
+
+Logout:
+POST /auth/logout
+
+The refresh token is revoked.
+The current access token is added to an in-memory blacklist until its natural expiry.
+
+Known limitation:
+The access-token blacklist is in memory. If the backend restarts, blacklisted access tokens become usable again until their normal expiry. This is acceptable for Release 1 but should move to Redis before scaling.
+
+2.3 User Profile Flow
+
+GET /user/me
+
+Returns the authenticated user's:
+- userId
+- email
+- role
+- role-specific profile
+
+PUT /user/profile
+
+Citizens can update:
+- name
+- latitude
+- longitude
+
+Workers can update:
+- name
+- skills
+
+Worker skills are copied into a plain DTO list before serialization to avoid Hibernate lazy loading issues.
+
+2.4 Report Creation Flow
+
+POST /reports
+
+Consumes multipart/form-data.
+
+Required form fields:
+- image: file part
+- description: text, max 1000 chars
+- category: POTHOLE, STREETLIGHT, GARBAGE, WATER_LEAK, ROAD_DAMAGE
+- lat: latitude from -90 to 90
+- lng: longitude from -180 to 180
+
+Only CITIZEN users can create reports.
+
+Flow:
+1. JwtAuthFilter authenticates the request.
+2. ReportController extracts multipart data.
+3. ReportService validates the image and fields.
+4. ReportService searches for nearby reports within 50 metres.
+5. If a same-category duplicate exists:
+   - No new report row is created.
+   - A ReportSupport row is added for the current citizen.
+   - supportCount is incremented.
+   - The existing report is returned.
+6. If no duplicate exists:
+   - Image is uploaded through StorageService.
+   - Returned Cloudinary URL is stored in imageUrl.
+   - A PostGIS Point is created.
+   - Report is saved with status CREATED.
+   - CitizenProfile.reportsSubmitted is incremented.
+   - A ReportSupport row is created for the report creator.
+   - supportCount starts at 1.
+   - A REPORT_CREATED notification is stored for the creator.
+
+Duplicate report response message:
+Existing report found - your support has been added
+
+New report response message:
+Report created successfully
+
+2.5 Nearby Reports Flow
+
+GET /reports/nearby?lat={lat}&lng={lng}&radius={radius}
+
+Authenticated users can query nearby reports.
+Default radius is 5000 metres.
+
+The query uses:
+- ST_DWithin for radius filtering
+- ST_Distance for sorting
+- location::geography casts for accurate metre-based distance
+
+Important:
+Longitude must be passed first to ST_MakePoint.
+GeoUtil.createPoint(lat, lng) stores coordinates as Coordinate(lng, lat).
+
+2.6 Support Flow
+
+POST /reports/{id}/support
+
+Only CITIZEN users can support reports.
+
+Flow:
+1. Report is loaded by id.
+2. Current user id is resolved from CustomUserDetails.
+3. The service checks whether this user already supported the report.
+4. If not supported:
+   - ReportSupport row is created.
+   - supportCount is incremented.
+   - A REPORT_SUPPORTED notification is stored for the original report owner.
+5. If already supported:
+   - 400 Bad Request is returned.
+
+Database constraint:
+report_support has a unique constraint on (report_id, user_id).
+
+2.7 Notification Flow
+
+GET /notifications
+
+Authenticated users can retrieve their own notifications.
+The optional unread query parameter filters by read state:
+- unread=true returns unread notifications
+- unread=false returns read notifications
+- omitted returns all notifications for the current user
+
+PATCH /notifications/{id}/read
+
+Marks the current user's notification as read.
+Users cannot mark another user's notification as read; the service returns 404 for missing or foreign notifications.
+
+Stored notification types currently used in Release 1:
+- REPORT_CREATED
+- REPORT_SUPPORTED
+
+2.8 Worker Discovery Flow
+
+GET /workers/reports/nearby?lat={lat}&lng={lng}
+
+Only WORKER users can access this endpoint.
+It returns nearby reports within 5 kilometres using the existing report geo-query path.
+
+============================================================
+3. Tests Currently Implemented
+============================================================
+
+Total passing tests:
+30
+
+Test command:
+mvn clean test
+
+Test groups:
+
+Auth integration tests:
+- Citizen registration and login return tokens.
+- Duplicate registration returns conflict.
+- Refresh token rotation revokes old refresh token.
+- Logout revokes refresh token and blacklists access token.
+
+User integration tests:
+- Authenticated citizen can fetch current profile.
+- Citizen can update profile name and location.
+- Worker can fetch and update worker profile.
+- Profile update requires authentication.
+
+Security integration tests:
+- Protected endpoint without JWT returns 401.
+- Public auth endpoint is reachable without JWT.
+
+Database integration tests:
+- Testcontainers PostgreSQL starts and can be queried.
+- PostGIS extension is available.
+
+Report integration tests:
+- Multipart report creation uploads image and stores point.
+- Report can be fetched by id.
+- Nearby reports return within radius and are sorted by distance.
+- Support increments once.
+- Duplicate support is rejected.
+- Duplicate report within 50 metres and same category adds support to existing report.
+- Geo query completes under 200ms with 1,000 seeded reports.
+
+Notification and discovery integration tests:
+- Report creation creates an unread notification for the creator.
+- Notification retrieval supports unread/read filtering.
+- Mark-as-read updates state for the current user.
+- A user cannot mark another user's notification as read.
+- Duplicate reporting/support creates a support notification for the original owner.
+- Notifications require authentication.
+- Worker nearby discovery is accessible to WORKER users and denied to CITIZEN users.
+
+Storage unit tests:
+- Cloudinary upload success path.
+- Cloudinary upload failure path.
+
+Exception handler tests:
+- Known exception response shapes are covered.
+
+============================================================
+4. Bugs and Issues Encountered
+============================================================
+
+Issue 1: Invalid JWT returned 403 instead of 401
+
+Root cause:
+JwtAuthFilter continued the filter chain after detecting invalid tokens.
+
+Impact:
+Spring Security treated the request as access denied instead of unauthenticated.
+
+Fix:
+JwtAuthFilter now writes a 401 response directly and returns immediately.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 2: Logout returned 500 in some invalid-token cases
+
+Root cause:
+Transactional exception behavior and token revocation paths were not mapped cleanly.
+
+Impact:
+Client received raw 500 instead of controlled error.
+
+Fix:
+Invalid logout state now uses typed exceptions. Refresh tokens are explicitly saved after revocation.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 3: application.properties used YAML-style syntax earlier
+
+Root cause:
+Properties file had nested YAML-like keys.
+
+Impact:
+JWT secret could resolve as null in Docker, breaking token generation.
+
+Fix:
+All properties must use flat dot notation.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 4: Backend could start before PostgreSQL was ready
+
+Root cause:
+Docker Compose depends_on only waited for container startup, not DB readiness.
+
+Impact:
+Backend could fail during startup.
+
+Fix:
+PostgreSQL healthcheck and service_healthy dependency were added.
+
+Status:
+Fixed for Docker Compose.
+
+------------------------------------------------------------
+
+Issue 5: Access token remained valid after logout
+
+Root cause:
+JWT access tokens are stateless.
+
+Impact:
+Logout revoked refresh token but not current access token.
+
+Fix:
+In-memory token blacklist added.
+JwtAuthFilter checks blacklist before authentication.
+Cleanup task removes expired blacklist entries.
+
+Status:
+Fixed for single-instance Release 1.
+
+Remaining risk:
+Blacklist resets on restart and does not work across multiple backend instances.
+Move to Redis in a later release.
+
+------------------------------------------------------------
+
+Issue 6: Testcontainers failed on Windows Docker Desktop earlier
+
+Root cause:
+Docker daemon discovery was not configured correctly.
+
+Impact:
+Integration tests could not start PostgreSQL containers.
+
+Fix/workaround:
+Docker Desktop must be running and Testcontainers must be configured to use the available Docker pipe.
+Current run successfully detected:
+npipe:////./pipe/docker_engine
+
+Status:
+Resolved in current environment.
+
+------------------------------------------------------------
+
+Issue 7: Spring Boot test mocking package changed
+
+Root cause:
+Old @MockBean package is deprecated/removed in newer Spring Boot/Spring Framework test stack.
+
+Impact:
+Compilation failures when using old mocking annotation.
+
+Fix:
+Use @MockitoBean from:
+org.springframework.test.context.bean.override.mockito.MockitoBean
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 8: RestAssured crashed before sending requests
+
+Root cause:
+RestAssured proxy setup failed with:
+Cannot invoke "Object.hashCode()" because "key" is null
+
+Impact:
+Security integration tests failed before reaching the backend.
+
+Fix:
+Integration tests now use Java's built-in HttpClient.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 9: Testcontainers container stopped while Spring context was reused
+
+Root cause:
+Each integration class had a separate container lifecycle, but Spring reused an app context whose datasource pointed to the first stopped container.
+
+Impact:
+Later DB tests failed with connection refused.
+
+Fix:
+BaseIntegrationTest starts a singleton PostGIS container for the test JVM.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 10: Duplicate refresh JWTs generated in same second
+
+Root cause:
+JWT contents were identical when login and refresh happened in the same second for the same subject.
+
+Impact:
+New refresh token could violate unique constraint in refresh_tokens.token.
+
+Fix:
+JwtUtil now adds a random JWT ID claim, jti.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 11: refresh_tokens.token was too short
+
+Root cause:
+Default column length was varchar(255).
+
+Impact:
+JWT with jti could exceed 255 characters and fail insert.
+
+Fix:
+RefreshToken.token column length increased to 1024.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 12: WorkerProfile skills caused lazy serialization failure
+
+Root cause:
+WorkerProfile.skills is an ElementCollection and could remain lazy when serialized.
+
+Impact:
+GET /user/me for workers could fail with LazyInitializationException.
+
+Fix:
+UserService maps skills into a new ArrayList inside a transaction.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 13: Report creation used TEMP_IMAGE_URL
+
+Root cause:
+Phase 3 report creation initially accepted JSON and did not use StorageService.
+
+Impact:
+Images were not uploaded, and reports did not store real image URLs.
+
+Fix:
+POST /reports now consumes multipart/form-data.
+Image is uploaded through StorageService.
+Returned URL is stored in Report.imageUrl.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 14: Report service had debug System.out prints
+
+Root cause:
+Support flow had temporary debugging output.
+
+Impact:
+Noisy logs and non-production style.
+
+Fix:
+ReportService was rewritten cleanly around helper methods:
+- validateCreateRequest
+- addSupport
+- createSupport
+- mapToResponse
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 15: Method-security denials returned 500 during Phase 4 worker tests
+
+Root cause:
+Spring Security method authorization exceptions reached the generic exception handler.
+
+Impact:
+A CITIZEN calling the worker-only discovery endpoint returned 500 instead of 403.
+
+Fix:
+GlobalExceptionHandler now maps access-denied exceptions to a structured 403 response.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 16: Notification ownership needed explicit enforcement
+
+Root cause:
+Mark-as-read must not update notifications owned by another user.
+
+Impact:
+Without owner-scoped lookup, notification privacy could be weakened.
+
+Fix:
+NotificationRepository now supports lookup by notification id and recipient id.
+NotificationService.markRead uses the authenticated current user id.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 17: Phase 4 integration test emails exceeded validator local-part limits
+
+Root cause:
+Long test prefixes plus UUIDs generated email local parts that Hibernate Validator rejected.
+
+Impact:
+The duplicate notification test failed at registration with "Email must be valid".
+
+Fix:
+Notification test email generation now truncates prefixes and uses a shorter UUID fragment.
+
+Status:
+Fixed.
+
+------------------------------------------------------------
+
+Issue 18: Root-level temporary artifacts were left from earlier debugging
+
+Root cause:
+compile_errors.txt and test_output.log were used as temporary debugging outputs.
+
+Impact:
+They added noise to the repository and were not useful as durable documentation.
+
+Fix:
+Both files are currently deleted in the working tree. Future log/error artifacts should be ignored.
+
+Status:
+Cleanup pending commit.
+
+Recommended .gitignore additions:
+*.log
+compile_errors.txt
+test_output.log
+
+------------------------------------------------------------
+
+Issue 19: GitHub documentation was missing
+
+Root cause:
+The repository had internal AI/developer references but no README.md for GitHub users.
+
+Impact:
+New contributors could not quickly understand Release 1 scope, setup, APIs, tests and known limitations.
+
+Fix:
+README.md has been created for Release 1 documentation.
+
+Status:
+Fixed.
+
+============================================================
+5. Current Developer Plan Recommendations
+============================================================
+
+5.1 Update Release 1 phase status
+
+The developer plan should now mark Release 1 Phase 4 as complete for the backend scope.
+
+Recommended status:
+- Phase 1 - Done
+- Phase 2 - Done
+- Phase 3 - Done
+- Phase 4 - Done
+
+5.2 Update Release 1 checklist
+
+Recommended checklist:
+
+[x] Auth flow: register -> login -> JWT -> protected endpoint
+[x] Report creation: image -> Cloudinary, GPS -> PostGIS, fields -> DB
+[x] Nearby search: reports returned sorted by distance
+[x] Support: count increments, duplicate detection in place
+[x] Notifications: stored on report creation/support, retrievable, markable as read
+[ ] All containers start cleanly with docker-compose up
+[x] Release 1 integration tests pass
+
+5.3 Phase 4 completed scope
+
+Completed Phase 4 scope:
+- Notification module with entity, repository, service, controller and response DTO.
+- Notification stored when a report is created.
+- Notification stored when duplicate reporting/support increments an existing report.
+- GET /notifications for authenticated users.
+- Read/unread filtering.
+- PATCH /notifications/{id}/read.
+- Worker-only nearby report discovery.
+- Integration tests for all Phase 4 flows.
+
+5.4 Before Release 2
+
+Recommended technical cleanup before worker marketplace:
+- Add Flyway or Liquibase migrations.
+- Remove real-looking Cloudinary credentials from application.properties.
+- Add a real PostGIS GiST index for reports.location.
+- Decide whether Report.citizenId should become a foreign key to users.
+- Add foreign key strategy for report_support reportId and userId.
+- Decide whether /auth/refresh should use a JSON DTO instead of raw text.
+- Add OpenAPI documentation.
+- Replace in-memory token blacklist with Redis before multi-instance deployment.
+
+5.5 Testing plan going forward
+
+Keep the current testing style:
+- Use Testcontainers for DB/PostGIS integration.
+- Mock external services like Cloudinary.
+- Use Java HttpClient for HTTP integration tests.
+- Add tests at module boundaries rather than only service unit tests.
+
+Next tests to add:
+- Report creation validation failures for missing image, invalid category and out-of-range coordinates.
+- Worker/admin authorization failures for report creation/support.
+- Docker Compose smoke test.
+- Notification ordering and pagination once notification volume grows.
+- Migration tests after Flyway/Liquibase is introduced.
+
+5.6 Working directory cleanup recommendations
+
+Keep:
+- claude.md
+- PROJECT_STATUS_AND_ISSUES_REPORT.txt
+- README.md
+- src/main/java/com/snapfix/notification
+- src/main/java/com/snapfix/worker
+- src/test/java/com/snapfix/integration/notification
+
+Keep deleted unless you specifically need old debug output:
+- compile_errors.txt
+- test_output.log
+
+Review before deleting:
+- pdf_text.txt, because it may be redundant with SnapFix Developer Reference.pdf but useful for searchable local reference.
+
+Safe generated cleanup:
+- target/ can be removed with mvn clean.
+
+============================================================
+6. Current Remaining Risks
+============================================================
+
+1. Secrets are present in application.properties.
+   Move Cloudinary and JWT values to environment variables only.
+
+2. Hibernate ddl-auto is still being used.
+   Add Flyway/Liquibase before schema becomes more complex.
+
+3. In-memory access-token blacklist is not production-grade.
+   Use Redis later.
+
+4. Notifications are persisted and retrievable, but there is no real-time push/WebSocket delivery yet.
+   Real-time delivery belongs in a later release.
+
+5. reports.location does not yet have an explicit spatial GiST index.
+   Current performance test passes at 1,000 reports, but production should use a spatial index.
+
+6. Report.citizenId and ReportSupport IDs are UUID fields, not JPA relationships.
+   This keeps modules simpler, but DB-level referential integrity is incomplete.
+
+7. Report status lifecycle is only an enum today.
+   No workflow exists yet for IN_PROGRESS or COMPLETED.
+
+8. Docker Compose smoke test has not been recorded after Phase 4.
+   Run docker-compose up --build and verify /actuator/health plus a basic auth/report flow.
+
+============================================================
+7. Quick API Reference
+============================================================
+
+Register:
+POST /auth/register
+Content-Type: application/json
+
+Login:
+POST /auth/login
+Content-Type: application/json
+
+Refresh:
+POST /auth/refresh
+Content-Type: text/plain
+
+Logout:
+POST /auth/logout
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+Current user:
+GET /user/me
+Authorization: Bearer <access-token>
+
+Update profile:
+PUT /user/profile
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+Create report:
+POST /reports
+Authorization: Bearer <citizen-access-token>
+Content-Type: multipart/form-data
+
+Nearby reports:
+GET /reports/nearby?lat=19.0&lng=72.0&radius=5000
+Authorization: Bearer <access-token>
+
+Get report:
+GET /reports/{id}
+Authorization: Bearer <access-token>
+
+Support report:
+POST /reports/{id}/support
+Authorization: Bearer <citizen-access-token>
+
+List notifications:
+GET /notifications?unread=true
+Authorization: Bearer <access-token>
+
+Mark notification read:
+PATCH /notifications/{id}/read
+Authorization: Bearer <access-token>
+
+Worker nearby reports:
+GET /workers/reports/nearby?lat=19.0&lng=72.0
+Authorization: Bearer <worker-access-token>
+
+============================================================
+8. Suggested Immediate Next Step
+============================================================
+
+Run a Docker Compose smoke test, then prepare the Developer Plan for Release 2.
+
+Recommended next implementation slice:
+1. Add Flyway or Liquibase before adding more tables.
+2. Add a real PostGIS GiST index for reports.location.
+3. Sanitize secrets from application.properties.
+4. Decide DB foreign-key strategy for report/report_support user references.
+5. Start Release 2 worker marketplace and task-assignment planning.

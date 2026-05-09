@@ -1,45 +1,47 @@
-# SnapFix – AI Assistant Context (CLAUDE.md)
+# SnapFix - AI Assistant Context (CLAUDE.md)
 
 ---
 
 # Project Overview
 
-SnapFix is a civic infrastructure reporting platform where citizens can report issues such as
-potholes, garbage, broken streetlights, and water leaks. Reports include images and geolocation
-and are discoverable by nearby users and workers.
-
-The system evolves into an AI-assisted civic infrastructure management platform with:
-
-- Worker marketplace & bidding
-- Task lifecycle management
-- Verification workflows
-- Payment system
-- AI classification & duplicate detection
-- Event-driven architecture
+SnapFix is a civic infrastructure reporting platform where citizens can report issues such as potholes, garbage, broken streetlights, water leaks, and road damage. Reports include an image and GPS coordinates, are stored with PostGIS geometry, and can be discovered by nearby authenticated users.
 
 This repository contains the **SnapFix Backend (Spring Boot)**.
+
+The long-term product direction is an AI-assisted civic infrastructure management platform with:
+
+- Worker marketplace and bidding
+- Task lifecycle management
+- Verification workflows
+- Payment and wallet system
+- AI classification and duplicate detection
+- Event-driven architecture
 
 ---
 
 # Current Development Stage
 
-| Field   | Value                                  |
-| ------- | -------------------------------------- |
-| Release | Release 1 – Civic Reporting Foundation |
-| Phase   | Phase 3 – Civic Report System          |
-| Status  | ✅ Phase 1-3 Core Testing Implemented   |
+| Field | Value |
+| ----- | ----- |
+| Release | Release 1 - Civic Reporting Foundation |
+| Current phase | Release 1 Phase 4 - Discovery and Notifications |
+| Completed phases | Phase 1 - Platform Foundation, Phase 2 - Identity and User System, Phase 3 - Civic Report System, Phase 4 - Discovery and Notifications |
+| Current status | Release 1 core backend implemented and integration-tested |
+| Latest verification | `mvn clean test` passes: 30 tests, 0 failures, 0 errors |
 
 ---
 
 # Tech Stack
 
-| Layer              | Technology                                             |
-| ------------------ | ------------------------------------------------------ |
-| Backend            | Java 21, Spring Boot, Spring Security, Spring Data JPA |
-| Database           | PostgreSQL + PostGIS                                   |
-| Storage            | Cloudinary                                             |
-| DevOps             | Docker, Docker Compose                                 |
-| Logging/Monitoring | Spring Boot Actuator, SLF4J, Logback                   |
+| Layer | Technology |
+| ----- | ---------- |
+| Backend | Java 21, Spring Boot 4.0.3, Spring Security, Spring Data JPA |
+| Database | PostgreSQL + PostGIS |
+| Spatial | Hibernate Spatial + JTS |
+| Storage | Cloudinary through `StorageService` |
+| DevOps | Docker, Docker Compose |
+| Testing | JUnit 5, Spring Boot Test, Testcontainers, MockitoBean, AssertJ |
+| Logging/Monitoring | Spring Boot Actuator, SLF4J, Logback, MDC tracing |
 
 ---
 
@@ -47,93 +49,183 @@ This repository contains the **SnapFix Backend (Spring Boot)**.
 
 ## Modular Monolith
 
-### Current Modules
+Current modules:
 
-```
+```text
 auth
 user
 report
 notification
+worker
 storage
 geo
+common
 ```
 
-### Future Modules (Release 2+)
+Planned modules:
 
-```
-worker / bid / task / admin / payment / wallet / rating / event / ai / analytics
+```text
+bid / task / admin / payment / wallet / rating / event / ai / analytics
 ```
 
 ## Module Structure
 
-Each module follows:
-
-```
-controller  → API layer (thin, no business logic)
-service     → business logic
-repository  → persistence only
-entity      → database models
-dto         → request/response models (never expose entities directly)
+```text
+controller  -> API layer, thin, no business logic
+service     -> business logic and transactions
+repository  -> persistence only
+entity      -> database models
+dto         -> request/response models, never expose entities directly
 ```
 
 ## Shared Layer
 
-```
+```text
 common/
-  entity    → BaseEntity, Location
-  exception → GlobalExceptionHandler
-  dto       → ApiResponse wrappers
-  util      → JwtUtil, helpers
+  entity     -> BaseEntity, Location
+  exception  -> GlobalExceptionHandler, ApiError
+  util       -> JwtUtil
 ```
+
+---
+
+# Implemented APIs
+
+## Auth and User - Phase 2
+
+| Method | Endpoint | Auth | Status |
+| ------ | -------- | ---- | ------ |
+| POST | `/auth/register` | Public | Implemented |
+| POST | `/auth/login` | Public | Implemented |
+| POST | `/auth/refresh` | Public | Implemented |
+| POST | `/auth/logout` | Bearer token recommended | Implemented |
+| GET | `/user/me` | Authenticated | Implemented |
+| PUT | `/user/profile` | CITIZEN or WORKER | Implemented |
+
+## Reports - Phase 3
+
+| Method | Endpoint | Auth | Description |
+| ------ | -------- | ---- | ----------- |
+| POST | `/reports` | CITIZEN | Multipart report creation with `image`, `description`, `category`, `lat`, `lng` |
+| GET | `/reports/nearby?lat=&lng=&radius=` | Authenticated | Returns reports within radius, sorted by metre-based distance |
+| GET | `/reports/{id}` | Authenticated | Returns one report by id |
+| POST | `/reports/{id}/support` | CITIZEN | Adds support once per user per report |
+
+`POST /reports` consumes `multipart/form-data`, not JSON.
+
+Required parts/fields:
+
+```text
+image       file part
+description text, max 1000 chars
+category    POTHOLE | STREETLIGHT | GARBAGE | WATER_LEAK | ROAD_DAMAGE
+lat         -90 to 90
+lng         -180 to 180
+```
+
+## Discovery and Notifications - Phase 4
+
+| Method | Endpoint | Auth | Description |
+| ------ | -------- | ---- | ----------- |
+| GET | `/notifications?unread=true|false` | Authenticated | Returns current user's notifications, optionally filtered by unread/read state |
+| PATCH | `/notifications/{id}/read` | Authenticated owner | Marks one notification as read |
+| GET | `/workers/reports/nearby?lat=&lng=` | WORKER | Worker discovery endpoint for nearby reports within 5 km |
+
+Notification events currently created:
+
+- `REPORT_CREATED` when a citizen creates a new report.
+- `REPORT_SUPPORTED` when a different citizen supports an existing report or duplicate report.
 
 ---
 
 # Entity Design
 
-## BaseEntity (abstract)
+## BaseEntity
 
-| Field     | Type    | Notes               |
-| --------- | ------- | ------------------- |
-| id        | UUID    | Auto-generated PK   |
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| id | UUID | Auto-generated primary key |
 | createdAt | Instant | Auto-set on persist |
-| updatedAt | Instant | Auto-set on update  |
+| updatedAt | Instant | Auto-set on update |
 
 ## User
 
-| Field        | Type        | Notes                    |
-| ------------ | ----------- | ------------------------ |
-| id           | UUID        | Extends BaseEntity       |
-| email        | String      | Unique, not null         |
-| passwordHash | String      | BCrypt hashed            |
-| role         | Role (enum) | CITIZEN / WORKER / ADMIN |
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| id | UUID | Extends BaseEntity |
+| email | String | Unique, not null |
+| passwordHash | String | BCrypt hashed |
+| role | Role | CITIZEN / WORKER / ADMIN |
 
 ## CitizenProfile
 
-| Field            | Type     | Notes               |
-| ---------------- | -------- | ------------------- |
-| userId           | UUID     | Shared PK (@MapsId) |
-| name             | String   |                     |
-| location         | Location | Embedded            |
-| reportsSubmitted | int      | Counter             |
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| userId | UUID | Shared primary key with User through `@MapsId` |
+| name | String | Required |
+| location | Location | Embedded latitude/longitude |
+| reportsSubmitted | int | Incremented when a new report row is created |
 
 ## WorkerProfile
 
-| Field  | Type         | Notes                    |
-| ------ | ------------ | ------------------------ |
-| userId | UUID         | Shared PK (@MapsId)      |
-| name   | String       |                          |
-| skills | List<String> | @ElementCollection       |
-| rating | Double       | Aggregate, updated in R3 |
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| userId | UUID | Shared primary key with User through `@MapsId` |
+| name | String | Required |
+| skills | List<String> | `@ElementCollection` |
+| rating | Double | Defaults to 0.0 |
 
 ## RefreshToken
 
-| Field      | Type    | Notes         |
-| ---------- | ------- | ------------- |
-| id         | UUID    |               |
-| token      | String  | Unique        |
-| user       | User    | @ManyToOne    |
-| expiryDate | Instant |               |
-| revoked    | boolean | Default false |
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| id | UUID | Auto-generated |
+| token | String | Unique, length 1024 |
+| user | User | Many-to-one |
+| expiryDate | Instant | 7-day expiry |
+| revoked | boolean | Defaults false |
+
+## Report
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| id | UUID | Auto-generated |
+| citizenId | UUID | Current user's id |
+| imageUrl | String | Cloudinary secure URL returned by `StorageService` |
+| description | String | Required, max 1000 chars |
+| category | Category | POTHOLE, STREETLIGHT, GARBAGE, WATER_LEAK, ROAD_DAMAGE |
+| location | Point | PostGIS `geometry(Point, 4326)` |
+| status | ReportStatus | CREATED, IN_PROGRESS, COMPLETED |
+| supportCount | int | Starts at 1 for creator support |
+| createdAt | Instant | Set during report creation |
+
+## ReportSupport
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| id | UUID | Auto-generated |
+| reportId | UUID | Report id |
+| userId | UUID | Supporting user id |
+| createdAt | Instant | Support timestamp |
+
+Unique constraint:
+
+```text
+(report_id, user_id)
+```
+
+This enforces one support per user per report.
+
+## Notification
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| notificationId | UUID | Auto-generated primary key |
+| recipient | User | Notification owner |
+| type | NotificationType | REPORT_CREATED, REPORT_SUPPORTED, BID_APPROVED |
+| message | String | User-facing event text |
+| read | boolean | Defaults false |
+| createdAt | Instant | Set on persist |
 
 ---
 
@@ -141,347 +233,313 @@ common/
 
 ## JWT Flow
 
-```
-Request → JwtAuthFilter → Validate Token → Set Authentication → Controller
+```text
+Request -> JwtAuthFilter -> validate token -> check blacklist -> set Authentication -> controller
 ```
 
 ## Token Strategy
 
-| Token Type    | TTL    | Storage |
-| ------------- | ------ | ------- |
-| Access Token  | 15 min | Client  |
-| Refresh Token | 7 days | DB      |
+| Token | TTL | Storage |
+| ----- | --- | ------- |
+| Access token | 15 minutes | Client |
+| Refresh token | 7 days | Database |
+
+Important implementation notes:
+
+- JWTs include a `jti` claim so two tokens issued in the same second for the same user are still unique.
+- Refresh token column length is 1024 to safely store JWTs.
+- Logout revokes the refresh token and blacklists the access token until its natural expiry.
+- The blacklist is in-memory for Release 1 and resets on server restart.
 
 ## Role Handling
 
-- `CustomUserDetailsService` uses `.roles(user.getRole().name())`
-- Spring auto-prefixes to `ROLE_CITIZEN`, `ROLE_WORKER`, `ROLE_ADMIN`
-- Use `@PreAuthorize("hasRole('CITIZEN')")` — NOT `hasAuthority`
-- Mixing `hasRole` and `hasAuthority` causes silent auth failures
+- `CustomUserDetailsService` grants authorities as `ROLE_` + role name.
+- Use `@PreAuthorize("hasRole('CITIZEN')")`, not `hasAuthority`.
+- Public endpoints under `/auth/**` must remain explicitly permitted in `SecurityConfig`.
 
 ---
 
-# Current Progress
+# Phase 3 Report System Details
 
-## ✅ Phase 1 – Platform Foundation (Completed)
+## Report Creation Flow
 
-- Spring Boot initialized, modular monolith architecture
-- BaseEntity with auditing fields
-- PostgreSQL + PostGIS configured, Dockerized
-- Spring Boot Actuator — `/actuator/health` working
-- Cloudinary integration complete
-- GlobalExceptionHandler with structured JSON error responses
-- SLF4J + Logback with MDC tracing
+```text
+Citizen -> POST /reports multipart
+  -> JwtAuthFilter validates CITIZEN token
+  -> ReportController extracts multipart fields
+  -> ReportService validates fields and image
+  -> Geo duplicate query within 50 metres
+  -> if same-category duplicate exists:
+       add ReportSupport for current user
+       increment supportCount
+       return existing report with duplicate message
+     else:
+       upload image through StorageService
+       create Report with PostGIS point
+       increment CitizenProfile.reportsSubmitted
+       create creator ReportSupport
+       create REPORT_CREATED notification
+       return created report
+```
 
----
+## Duplicate Detection
 
-## ✅ Phase 2 – Identity & User System (Completed)
+- Query reports within 50 metres using PostGIS.
+- Filter same category in service.
+- If same user already supported that report, return 400.
+- If a different citizen reports the same issue, support is added to the existing report instead of creating a new row.
+- Supporting or duplicate-reporting an existing issue creates a `REPORT_SUPPORTED` notification for the original report owner.
 
-### APIs Implemented
+Response message:
 
-| Method | Endpoint       | Status |
-| ------ | -------------- | ------ |
-| POST   | /auth/register | ✅     |
-| POST   | /auth/login    | ✅     |
-| POST   | /auth/refresh  | ✅     |
-| POST   | /auth/logout   | ✅     |
-| GET    | /user/me       | ✅     |
-| PUT    | /user/profile  | ✅     |
+```text
+Existing report found - your support has been added
+```
 
-### Security Features
+## Geo Query
 
-- Password hashing (BCrypt)
-- JWT validation filter (JwtAuthFilter)
-- Stateless session management
-- Refresh token rotation
-- Refresh token revocation on logout
-- Role-based access via @PreAuthorize
-- Custom AuthenticationEntryPoint (401)
-- Custom AccessDeniedHandler (403)
-- Input validation via @Valid + @NotBlank / @Email / @Size
-
----
-
-## 🚧 Phase 3 – Civic Report System (Not Started)
-
-### Entities to Build
-
-**Report**
-| Field | Type | Notes |
-|--------------|---------------------|----------------------------------------------------|
-| id | UUID | |
-| citizenId | UUID | FK to User |
-| imageUrl | String | Cloudinary URL |
-| description | String | Max 1000 chars |
-| category | Category (enum) | POTHOLE, STREETLIGHT, GARBAGE, WATER_LEAK, ROAD_DAMAGE |
-| location | Point | PostGIS geometry — lat/lng |
-| status | ReportStatus (enum) | CREATED → IN_PROGRESS → COMPLETED |
-| supportCount | int | Incremented on duplicate detection |
-| createdAt | Instant | |
-
-### APIs to Build
-
-| Method | Endpoint              | Description                                                     |
-| ------ | --------------------- | --------------------------------------------------------------- |
-| POST   | /reports              | Create report — multipart/form-data (image + fields)            |
-| GET    | /reports/nearby       | Reports within radius. Params: lat, lng, radius (default 5000m) |
-| GET    | /reports/{id}         | Single report by ID                                             |
-| POST   | /reports/{id}/support | Increment support count (one per user per report)               |
-
-### PostGIS Geo Query
+Repository query:
 
 ```sql
 SELECT * FROM reports
 WHERE ST_DWithin(
-  location::geography,
-  ST_MakePoint(:lng, :lat)::geography,
-  :radiusMetres
+    location::geography,
+    ST_MakePoint(:lng, :lat)::geography,
+    :radius
 )
-ORDER BY ST_Distance(location::geography, ST_MakePoint(:lng, :lat)::geography);
+ORDER BY ST_Distance(
+    location::geography,
+    ST_MakePoint(:lng, :lat)::geography
+)
 ```
 
-⚠️ Always use `::geography` cast for accurate metre-based distance.
+Important:
 
-### Duplicate Detection Logic
-
-- On `POST /reports`: run geo query within **50 metres**, same category
-- If match found → call `POST /reports/{existingId}/support` instead of creating
-- Return HTTP 200 with existing report + message: "Existing report found — your support has been added"
-
-### Phase 3 Definition of Done
-
-- [ ] POST /reports creates report, uploads image, stores PostGIS point
-- [ ] GET /reports/nearby returns correct results with varying radius
-- [ ] Support count increments correctly — duplicate prevention works
-- [ ] Geo query runs in < 200ms against 1,000 seeded reports
-- [x] Test coverage > 65%
+- Always pass longitude first to `ST_MakePoint`.
+- Always use `::geography` for metre-based radius and sorting.
+- `GeoUtil.createPoint(lat, lng)` intentionally stores as `Coordinate(lng, lat)`.
 
 ---
 
-# Known Issues & Fixes Applied
+# Test Coverage
 
-## ✅ Fix 1 — HTTP 403 Instead of 401 on Invalid/Missing JWT
+Latest command:
 
-**Root cause:**
-`JwtAuthFilter` was calling `filterChain.doFilter()` even when `validateToken()`
-returned false. Spring's `ExceptionTranslationFilter` saw an empty `SecurityContext`
-and called `AccessDeniedHandler` (403) instead of `AuthenticationEntryPoint` (401).
+```text
+mvn clean test
+```
 
-**Fix applied in `JwtAuthFilter`:**
+Latest result:
 
-- Invalid/expired token with `Bearer` header → write 401 directly + `return` (stop chain)
-- Missing `Authorization` header → pass through (Spring fires `CustomAuthenticationEntryPoint` → 401)
-- Fixed wrong import: `io.jsonwebtoken.io.IOException` replaced with `java.io.IOException`
+```text
+Tests run: 30, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
 
-**Correct behaviour after fix:**
-| Scenario | Status |
-|---------------------------------|--------|
-| Valid token → /user/me | 200 ✅ |
-| Expired token → /user/me | 401 ✅ |
-| Missing token → /user/me | 401 ✅ |
-| Malformed token → /user/me | 401 ✅ |
-| Valid token, wrong role | 403 ✅ |
+Implemented test areas:
+
+- Auth registration, login, refresh rotation, logout revocation and blacklist
+- User current profile and profile updates for citizens/workers
+- Security 401 behavior for protected endpoints
+- Testcontainers PostgreSQL and PostGIS availability
+- Cloudinary storage service unit behavior
+- Report creation with multipart upload
+- Report fetch by id
+- Nearby reports sorted by distance
+- Support count increment and duplicate prevention
+- Duplicate report detection within 50 metres
+- Geo query performance with 1,000 seeded reports under 200ms
+- Notification creation when reports are created
+- Notification retrieval and unread/read filtering
+- Mark-as-read ownership protection
+- Notification generation when duplicate reporting adds support
+- Worker-only nearby report discovery authorization
+
+Notable test infrastructure:
+
+- `BaseIntegrationTest` uses a singleton PostGIS Testcontainers database for stable context reuse.
+- HTTP integration tests use Java `HttpClient` instead of RestAssured because RestAssured proxy handling caused environment-specific failures.
+- `StorageService` is mocked in report and notification integration tests with `@MockitoBean` so Cloudinary is not called during tests.
 
 ---
 
-## ✅ Fix 2 — /logout Returning 500
+# Known Issues and Fixes Applied
 
-**Root causes:**
+## Fixed: 403 Instead of 401 for Invalid JWT
 
-1. `IllegalStateException` thrown inside `@Transactional` was being wrapped by Spring
-   before reaching `GlobalExceptionHandler` → raw 500. Fixed by throwing
-   `IllegalArgumentException` (maps cleanly to 400).
-2. `refreshTokenRepository.findByUser(user).forEach(t -> t.setRevoked(true))` in
-   `login()` mutated entities without calling `saveAll()` → old tokens stayed active.
+`JwtAuthFilter` now writes 401 and returns immediately for invalid, malformed, expired, or blacklisted bearer tokens.
 
-**Fix applied:**
+## Fixed: Logout Returned 500
 
-- `logout()` now throws `IllegalArgumentException` (not `IllegalStateException`)
-- `login()` now calls `refreshTokenRepository.saveAll(existingTokens)` after revoking
+Logout now maps invalid refresh tokens to typed exceptions. Existing refresh tokens are revoked and saved during login/logout flows.
 
----
+## Fixed: YAML Syntax in `application.properties`
 
-## ✅ Fix 3 — application.properties Using YAML Syntax
-
-**Root cause:**
-`application.properties` was using YAML-style nested syntax:
-
-```
-jwt:
-  secret: your-key   ← INVALID in .properties files
-```
-
-In Docker, strict parsing caused `jwt.secret` to resolve as `null` →
-`Keys.hmacShaKeyFor(null)` throws → all JWT operations fail → 403/500.
-
-In the IDE this was silently ignored, which is why it worked in the debugger
-but failed in Docker.
-
-**Fix applied:** Converted all properties to flat dot-notation:
+All properties must use flat dot notation, for example:
 
 ```properties
 jwt.secret=your-very-secret-key-that-is-at-least-32-bytes-long
 jwt.expiration=900000
 ```
 
----
+## Fixed: Backend Starting Before DB in Docker
 
-## ⚠️ Fix 4 — Docker: Backend Starts Before DB is Ready (Partially Resolved)
+`docker-compose.yml` uses PostgreSQL healthcheck and `condition: service_healthy`.
 
-**Root cause:**
-`depends_on: postgres` only waits for the container to _start_, not for PostgreSQL
-to _accept connections_. Backend crashed on startup because DB wasn't ready.
+## Fixed: Access Token Still Valid After Logout
 
-**Fix applied in `docker-compose.yml`:**
+An in-memory token blacklist checks access tokens on every authenticated request.
 
-```yaml
-postgres:
-  healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U postgres"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
+## Fixed: Testcontainers on Windows
 
-backend:
-  depends_on:
-    postgres:
-      condition: service_healthy
+Docker Desktop must be running and Testcontainers must be able to reach the Docker daemon through the configured pipe.
 
-## ✅ Fix 5 — Access Token Still Valid After Logout
+## Fixed: Testcontainers Context Reuse Bug
 
-**Root cause:**
-JWT access tokens are stateless — revoking the refresh token only blocks
-new access tokens from being issued. The current access token remained
-valid until its 15-minute TTL expired.
+`BaseIntegrationTest` starts one shared PostGIS container so later integration tests do not reuse a Spring context pointing at a stopped container.
 
-**Fix applied — In-Memory Token Blacklist:**
-- `TokenBlacklistService`: ConcurrentHashMap of token → expiry
-- On logout, access token extracted from `Authorization` header and
-  blacklisted for its remaining lifetime
-- `JwtAuthFilter` checks blacklist before setting authentication
-- `TokenBlacklistCleanupTask` purges expired entries every 15 minutes
-  via @Scheduled to prevent memory leak
+## Fixed: RestAssured Proxy Crash
 
-**Known limitation:**
-Blacklist resets on server restart. Tokens revoked before restart
-become valid again until their natural expiry. Acceptable for Phase 2.
-Migrate to Redis blacklist in Release 4 when Redis is added.
+Security and API integration tests use Java `HttpClient`.
 
----
+## Fixed: Duplicate Refresh JWTs
 
-## ✅ Fix 6 — Spring Boot 3.4+ Test Mocking Package Change
+`JwtUtil` now adds `jti` to access and refresh tokens. Without this, login and refresh within the same second could generate identical JWT strings.
 
-**Root cause:**
-The `@MockBean` annotation was historically available in `org.springframework.boot.test.mock.mockito.MockBean`.
-However, starting from Spring Boot 3.4.0 (Spring Framework 6.2), this package and annotation were deprecated/removed, which caused compilation failures during the implementation of the automated test suite.
+## Fixed: Refresh Token Column Too Small
 
-**Fix applied:**
-- Migrated all usages of `@MockBean` to `@MockitoBean` located at `org.springframework.test.context.bean.override.mockito.MockitoBean`.
-- This ensures test dependencies compile and run correctly on newer Spring Boot environments.
+`RefreshToken.token` length is now 1024 because JWTs with `jti` can exceed 255 characters.
+
+## Fixed: Worker Skills Lazy Serialization
+
+`UserService` copies worker skills into a plain DTO list inside a transaction before returning responses.
+
+## Fixed: Phase 3 Placeholder Image URL
+
+Report creation now uploads the multipart image through `StorageService` and stores the returned image URL.
+
+## Fixed: Method Security Denials Reaching Generic 500 Handler
+
+`GlobalExceptionHandler` now maps Spring Security access-denied exceptions to 403 JSON responses so `@PreAuthorize` failures do not become generic 500s.
+
+## Fixed: Phase 4 Notification Ownership
+
+`NotificationService.markRead` loads notifications by notification id and current user id, so users cannot mark another user's notification as read. Missing or foreign notifications return 404.
+
+## Fixed: Phase 4 Email Test Fixture Length
+
+Notification integration tests now generate shorter unique emails so Hibernate Validator's email validation does not reject long local parts.
 
 ---
 
-## ✅ Fix 7 — Test DTO Property Name Mismatches
+# Current Limitations
 
-**Root cause:**
-During the creation of the generic `TestDataFactory`, property assignments to DTOs were modeled incorrectly (e.g., calling `setFirstName` and `setLastName` on `RegisterRequest`, and `setFirstName` on `ProfileUpdateDto`). These did not match the actual implementations.
-`RegisterRequest` uses `name` instead of separated fields and requires a `Role`, and `ProfileUpdateDto` uses `name`.
-
-**Fix applied:**
-- Updated the testing factory to properly map the correct variable fields (`setName("Test User")` and `setRole(Role.CITIZEN)`).
+- Access-token blacklist is in memory and should move to Redis in a later release.
+- No database migration tool is configured yet; schema currently relies on Hibernate DDL.
+- `application.properties` currently contains Cloudinary-looking values and should be sanitized before sharing or production deployment.
+- `Report.citizenId` is stored as UUID rather than a JPA relationship to `User`; this keeps the module simple but leaves referential integrity unenforced at DB level.
+- Report status lifecycle exists as enum only; no worker/task transition engine yet.
+- Notifications are stored and retrievable, but real-time push/WebSocket delivery is deferred to later releases.
 
 ---
 
-## ⚠️ Fix 8 — Windows Docker Desktop Testcontainers Failure
+# Developer Plan Updates Recommended
 
-**Root cause:**
-When executing `mvnw clean verify`, `Testcontainers` (v1.19.7) failed to discover the Docker Daemon, throwing: `IllegalStateException: Could not find a valid Docker environment`. This typically occurs on Windows systems when the default Docker Desktop context `desktop-linux` pipe isn't mapped automatically, or if TLS-less TCP exposes aren't configured.
+## Release 1 Plan Should Be Updated
 
-**Fix attempted / Workaround:**
-- Code implementation is correct and valid. Tests must run inside a properly configured Windows Docker environment.
-- **Solution:** Ensure Docker Desktop is active, and under settings "Expose daemon on tcp://localhost:2375 without TLS" is toggled ON. Alternatively, specify the `DOCKER_HOST` environment variable pointing to the appropriate pipe (e.g., `npipe:////./pipe/dockerDesktopLinuxEngine`) prior to executing Maven.
+Phase 4 should now be marked complete for Release 1's backend scope.
 
-# Development Guidelines
+| Phase | Description | Status |
+| ----- | ----------- | ------ |
+| 1 | Platform Foundation | Done |
+| 2 | Identity and User System | Done |
+| 3 | Civic Report System | Done |
+| 4 | Discovery and Notifications | Done |
 
-## General Rules
+Release 1 final checklist should now read:
 
-- Keep controllers thin — no business logic
-- Use DTOs always — never expose entities directly in responses
-- Business logic belongs in services only
-- Repository = persistence only, no logic
-- Use `@Transactional` on all service methods that write to DB
-- Follow modular boundaries — modules must not reach into each other's repositories
+- [x] Auth flow: register -> login -> JWT -> protected endpoint
+- [x] Report creation: image -> Cloudinary, GPS -> PostGIS, fields -> DB
+- [x] Nearby search: reports returned sorted by distance
+- [x] Support: count increments, duplicate detection in place
+- [x] Notifications: stored on report creation/support, retrievable, markable as read
+- [ ] All containers start cleanly with `docker-compose up`
+- [x] Test coverage target for Release 1 currently satisfied by integration tests
 
-## Exception Handling Rules
+## Phase 4 Scope Completed
 
-- `IllegalArgumentException` → 400 Bad Request
-- `IllegalStateException` → 409 Conflict
-- `UsernameNotFoundException` → handled by Spring Security → 401
-- Never throw raw `RuntimeException` from service methods — always use typed exceptions
-- `GlobalExceptionHandler` must catch both `IllegalArgumentException` and
-  `IllegalStateException` explicitly to prevent 500s from `@Transactional` wrapping
+- Added `notification` module with entity, repository, service, controller, and DTO.
+- Created notifications when a new report is created.
+- Created notifications when duplicate reporting or support increments an existing report.
+- Added `GET /notifications` with unread/read filtering.
+- Added `PATCH /notifications/{id}/read`.
+- Added worker discovery endpoint at `GET /workers/reports/nearby`.
+- Added integration tests for the Phase 4 flows.
 
-## Security Rules
+## Recommended Before Release 2
 
-- Always use `hasRole('X')` with `@PreAuthorize` — never `hasAuthority('X')`
-- Never call `filterChain.doFilter()` after writing an error response in a filter
-- `JwtAuthFilter` must `return` immediately after writing 401 — do not continue the chain
-- Public endpoints (`/auth/**`) must be explicitly listed in `SecurityConfig.permitAll()`
-
-## Docker Rules
-
-- Never use `localhost` in `SPRING_DATASOURCE_URL` inside Docker — use the service name (e.g. `postgres`)
-- Always use flat dot-notation in `application.properties` — never YAML-style nesting
-- Always pass `JWT_SECRET` and `JWT_EXPIRATION` as env vars in `docker-compose.yml`
-- Use `condition: service_healthy` on `depends_on` — never bare `depends_on`
-- Run `docker-compose logs backend` first when debugging startup failures
+<!-- - Add Flyway or Liquibase before schema grows further. -->
+- Move secrets out of committed properties and into environment variables.
+- Add a real spatial GiST index for `reports.location`; Hibernate `@Index` does not create the ideal PostGIS spatial index.
+- Add DB foreign keys or explicit integrity strategy for `Report.citizenId` and `ReportSupport.reportId/userId`.
+- Replace in-memory token blacklist with Redis before scaling beyond one backend instance.
+- Decide whether `/auth/refresh` should accept JSON DTO instead of raw text body.
+- Add API documentation with request/response examples.
 
 ---
 
 # Folder Structure
 
-```
+```text
 src/main/java/com/snapfix/
-├── config/
-│   └── SecurityConfig.java
-├── common/
-│   ├── entity/       → BaseEntity, Location
-│   ├── exception/    → GlobalExceptionHandler
-│   ├── dto/          → ApiResponse
-│   └── util/         → JwtUtil
-├── auth/
-│   ├── controller/   → AuthController
-│   ├── service/      → AuthService
-│   ├── repository/   → RefreshTokenRepository
-│   ├── entity/       → RefreshToken
-│   ├── dto/          → RegisterRequest, LoginRequest, LogoutRequest, AuthResponse
-│   └── security/     → JwtAuthFilter, CustomUserDetailsService,
-│                        CustomAuthenticationEntryPoint, CustomAccessDeniedHandler
-├── user/
-│   ├── controller/   → UserController
-│   ├── service/      → UserService
-│   ├── repository/   → UserRepository, CitizenProfileRepository, WorkerProfileRepository
-│   ├── entity/       → User, CitizenProfile, WorkerProfile, Role
-│   └── dto/          → UserResponse, ProfileUpdateDto
-├── report/           → (Phase 3)
-├── notification/     → (Phase 4)
-├── storage/          → StorageService (Cloudinary)
-└── geo/              → (Phase 3)
+  config/
+    SecurityConfig.java
+    CloudinaryConfig.java
+    RequestLoggingFilter.java
+  common/
+    entity/
+    exception/
+    util/
+  auth/
+    controller/
+    service/
+    repository/
+    entity/
+    dto/
+    security/
+  user/
+    controller/
+    service/
+    repository/
+    entity/
+    dto/
+  report/
+    controller/
+    service/
+    repository/
+    entity/
+    dto/
+  storage/
+    service/
+    controller/
+  geo/
+    util/
 ```
 
 ---
 
 # Docker Environment
 
-```yaml
-# docker-compose.yml runs:
-postgres:   postgis/postgis:15-3.3  → port 5432
-backend:    build: .                → port 8080
+`docker-compose.yml` runs:
+
+```text
+postgres: postgis/postgis:15-3.3 -> port 5432
+backend:  build: .               -> port 8080
 ```
 
-**Required env vars for backend container:**
+Required backend environment variables:
 
-```
+```text
 SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/snapfix
 SPRING_DATASOURCE_USERNAME=postgres
 SPRING_DATASOURCE_PASSWORD=password
@@ -492,69 +550,66 @@ CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
 ```
 
+Docker rules:
+
+- Use `postgres` as the DB hostname inside Docker, not `localhost`.
+- Keep `condition: service_healthy`.
+- Use flat dot notation in `.properties`.
+- Inspect `docker-compose logs backend` first when debugging startup.
+
 ---
 
-# Full Roadmap
+# Roadmap
 
-## Release 1 – Civic Reporting Foundation
+## Release 1 - Civic Reporting Foundation
 
-| Phase | Description               | Status     |
-| ----- | ------------------------- | ---------- |
-| 1     | Platform Foundation       | ✅ Done    |
-| 2     | Identity & User System    | ✅ Done    |
-| 3     | Civic Report System       | 🚧 Next    |
-| 4     | Discovery & Notifications | ⬜ Pending |
+- Phase 1: Platform Foundation - Done
+- Phase 2: Identity and User System - Done
+- Phase 3: Civic Report System - Done
+- Phase 4: Discovery and Notifications - Done
 
-**Release 1 Final Checklist:**
+## Release 2 - Worker Marketplace and Task Assignment
 
-- [ ] Auth flow: register → login → JWT → protected endpoint
-- [ ] Report creation: image → Cloudinary, GPS → PostGIS, fields → DB
-- [ ] Nearby search: reports returned sorted by distance
-- [ ] Support: count increments, duplicate detection in place
-- [ ] Notifications: stored on report creation, retrievable
-- [ ] All containers start cleanly with docker-compose up
-- [ ] Test coverage > 70%
+- Worker profile location tracking
+- Bidding marketplace
+- Admin governance and AdminActionLog
+- Task lifecycle engine
 
-## Release 2 – Worker Marketplace & Task Assignment
+## Release 3 - Task Completion, Verification and Payment
 
-- Worker profile + location tracking
-- Bidding marketplace (place, withdraw, approve bids)
-- Admin governance + AdminActionLog
-- Task lifecycle engine (ASSIGNED → IN_PROGRESS)
+- Proof of work upload
+- Citizen verification workflow
+- Retry logic
+- Payment and wallet
+- Worker reputation
 
-## Release 3 – Task Completion, Verification & Payment
+## Release 4 - AI Intelligence and Event-Driven Architecture
 
-- Proof of work system (image upload + GPS)
-- Citizen verification workflow (VERIFIED / REJECTED)
-- Retry logic (max 3 retries)
-- Payment + wallet system
-- Worker reputation / rating
-
-## Release 4 – AI Intelligence & Event-Driven Architecture
-
-- Kafka event bus replacing synchronous service calls
-- FastAPI AI service: image validation, category classification, duplicate detection
-- pgvector for embedding-based similarity search
-- Priority scoring engine
+- Kafka event bus
+- FastAPI AI service
+- Image validation and category classification
+- Duplicate detection improvements
+- pgvector similarity search
+- Priority scoring
 - Real-time WebSocket notifications
 
-## Release 5 – Production Hardening & Scalability
+## Release 5 - Production Hardening and Scalability
 
-- Spring Cloud Gateway (JWT at gateway level)
-- Redis rate limiting + caching
-- Observability: Prometheus + Grafana + ELK stack
+- Spring Cloud Gateway
+- Redis rate limiting and caching
+- Prometheus, Grafana, ELK
 - GitHub Actions CI/CD
 - Kubernetes with HPA
-- k6 load testing (target: p95 < 300ms at 1,000 concurrent users)
+- k6 load testing
 - City analytics dashboard
 
 ---
 
 # Non-Functional Targets
 
-| Metric              | Target                   |
-| ------------------- | ------------------------ |
-| Reports supported   | 1,000                    |
-| Concurrent users    | 100                      |
-| API response time   | < 200ms                  |
-| Geo query (Phase 3) | < 200ms on 1,000 reports |
+| Metric | Target |
+| ------ | ------ |
+| Reports supported in Phase 3 tests | 1,000 |
+| Concurrent users | 100 |
+| API response time | < 200ms where practical |
+| Geo query | < 200ms on 1,000 seeded reports |

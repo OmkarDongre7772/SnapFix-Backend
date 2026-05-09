@@ -15,6 +15,18 @@ import lombok.Setter;
 @Entity
 @Table(name = "users")
 public class User extends BaseEntity{
+    public User() {
+    }
+
+    public User(User user) {
+        this.email = user.getEmail();
+        this.passwordHash = user.getPasswordHash();
+        this.role = user.getRole();
+        super.setId(user.getId());
+        super.setCreatedAt(user.getCreatedAt());
+        super.setUpdatedAt(user.getUpdatedAt());
+    }
+
     @Column(unique = true, nullable = false)
     private String email;
 
