@@ -24,6 +24,7 @@ Repository documentation status:
 - claude.md reflects the current Release 1 Phase 4 implementation.
 - README.md has been added for GitHub-facing Release 1 documentation.
 - PROJECT_STATUS_AND_ISSUES_REPORT.txt is the current engineering status and issue log.
+- Secret-bearing configuration has been moved to environment-variable placeholders.
 
 Latest verified command:
 mvn clean test
@@ -612,6 +613,24 @@ README.md has been created for Release 1 documentation.
 Status:
 Fixed.
 
+------------------------------------------------------------
+
+Issue 20: Cloudinary credentials were committed in configuration files
+
+Root cause:
+Real Cloudinary-looking values were present in application.properties, docker-compose.yml and the tracked .env file.
+
+Impact:
+Repository history and future commits could expose credentials. Anyone with the old values should treat them as compromised.
+
+Fix:
+application.properties, application.yaml and docker-compose.yml now use environment-variable placeholders with non-secret development defaults.
+.env is ignored and removed from the git index.
+.env.example was added as a safe committed template.
+
+Status:
+Fixed in the working tree. Rotate the exposed Cloudinary API secret in Cloudinary before considering the repository safe.
+
 ============================================================
 5. Current Developer Plan Recommendations
 ============================================================
@@ -654,7 +673,7 @@ Completed Phase 4 scope:
 
 Recommended technical cleanup before worker marketplace:
 - Add Flyway or Liquibase migrations.
-- Remove real-looking Cloudinary credentials from application.properties.
+- Rotate any Cloudinary credentials that were previously committed.
 - Add a real PostGIS GiST index for reports.location.
 - Decide whether Report.citizenId should become a foreign key to users.
 - Add foreign key strategy for report_support reportId and userId.
@@ -701,8 +720,9 @@ Safe generated cleanup:
 6. Current Remaining Risks
 ============================================================
 
-1. Secrets are present in application.properties.
-   Move Cloudinary and JWT values to environment variables only.
+1. Secrets were previously present in committed configuration.
+   Fixed in the working tree. Configuration now uses environment-variable placeholders.
+   Remaining action: rotate the previously exposed Cloudinary secret.
 
 2. Hibernate ddl-auto is still being used.
    Add Flyway/Liquibase before schema becomes more complex.

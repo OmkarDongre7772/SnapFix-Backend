@@ -320,8 +320,8 @@ but failed in Docker.
 **Fix applied:** Converted all properties to flat dot-notation:
 
 ```properties
-jwt.secret=your-very-secret-key-that-is-at-least-32-bytes-long
-jwt.expiration=900000
+jwt.secret=${JWT_SECRET:change-me-dev-secret-at-least-32-bytes-long}
+jwt.expiration=${JWT_EXPIRATION:900000}
 ```
 
 ---
@@ -485,11 +485,11 @@ backend:    build: .                → port 8080
 SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/snapfix
 SPRING_DATASOURCE_USERNAME=postgres
 SPRING_DATASOURCE_PASSWORD=password
-JWT_SECRET=your-very-secret-key-that-is-at-least-32-bytes-long
+JWT_SECRET=replace-with-a-random-secret-at-least-32-bytes-long
 JWT_EXPIRATION=900000
-CLOUDINARY_CLOUD_NAME=...
-CLOUDINARY_API_KEY=...
-CLOUDINARY_API_SECRET=...
+CLOUDINARY_CLOUD_NAME=replace-with-cloudinary-cloud-name
+CLOUDINARY_API_KEY=replace-with-cloudinary-api-key
+CLOUDINARY_API_SECRET=replace-with-cloudinary-api-secret
 ```
 
 ---

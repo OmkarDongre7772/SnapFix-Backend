@@ -1,8 +1,8 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/snapfix
-    username: postgres
-    password: password
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/snapfix}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:password}
 
   jpa:
     hibernate:
@@ -17,5 +17,5 @@ management:
         include: health
 
 jwt:
-  secret: your-very-secret-key-that-is-at-least-32-bytes-long
-  expiration: 900000
+  secret: ${JWT_SECRET:change-me-dev-secret-at-least-32-bytes-long}
+  expiration: ${JWT_EXPIRATION:900000}

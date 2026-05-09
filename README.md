@@ -72,14 +72,14 @@ Important configuration keys:
 ```properties
 spring.datasource.url=jdbc:postgresql://localhost:5432/snapfix
 spring.datasource.username=postgres
-spring.datasource.password=password
+spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:password}
 
-jwt.secret=your-very-secret-key-that-is-at-least-32-bytes-long
-jwt.expiration=900000
+jwt.secret=${JWT_SECRET:change-me-dev-secret-at-least-32-bytes-long}
+jwt.expiration=${JWT_EXPIRATION:900000}
 
-cloudinary.cloud-name=...
-cloudinary.api-key=...
-cloudinary.api-secret=...
+cloudinary.cloud-name=${CLOUDINARY_CLOUD_NAME:dev-cloud-name}
+cloudinary.api-key=${CLOUDINARY_API_KEY:dev-api-key}
+cloudinary.api-secret=${CLOUDINARY_API_SECRET:dev-api-secret}
 ```
 
 For Docker Compose, the backend should connect to PostgreSQL through the Docker service name:
@@ -88,7 +88,7 @@ For Docker Compose, the backend should connect to PostgreSQL through the Docker 
 SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/snapfix
 ```
 
-Do not commit real production secrets. Move Cloudinary and JWT values to environment variables before sharing or deploying.
+Do not commit real production secrets. Use `.env` locally and keep `.env.example` as the committed template.
 
 ## Run Locally
 
@@ -184,7 +184,7 @@ lng         longitude
 
 ## Current Known Limitations
 
-- `application.properties` currently contains development-looking secrets and should be sanitized.
+- Secrets are loaded through environment variables. `.env` is ignored; `.env.example` is the committed template.
 - Schema management uses Hibernate DDL; Flyway or Liquibase should be added before Release 2.
 - Access-token blacklist is in memory and should move to Redis before multi-instance deployment.
 - Notifications are persisted, but real-time push/WebSocket delivery is not part of Release 1.

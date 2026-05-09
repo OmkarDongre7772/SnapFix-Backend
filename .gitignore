@@ -6,6 +6,9 @@ target/
 *.log
 compile_errors.txt
 test_output.log
+.env
+.env.*
+!.env.example
 
 
 ### STS ###

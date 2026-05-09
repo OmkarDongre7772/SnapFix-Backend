@@ -378,8 +378,8 @@ Logout now maps invalid refresh tokens to typed exceptions. Existing refresh tok
 All properties must use flat dot notation, for example:
 
 ```properties
-jwt.secret=your-very-secret-key-that-is-at-least-32-bytes-long
-jwt.expiration=900000
+jwt.secret=${JWT_SECRET:change-me-dev-secret-at-least-32-bytes-long}
+jwt.expiration=${JWT_EXPIRATION:900000}
 ```
 
 ## Fixed: Backend Starting Before DB in Docker
@@ -436,7 +436,7 @@ Notification integration tests now generate shorter unique emails so Hibernate V
 
 - Access-token blacklist is in memory and should move to Redis in a later release.
 - No database migration tool is configured yet; schema currently relies on Hibernate DDL.
-- `application.properties` currently contains Cloudinary-looking values and should be sanitized before sharing or production deployment.
+- Secrets are loaded through environment variables. `.env` is ignored and `.env.example` is the committed template.
 - `Report.citizenId` is stored as UUID rather than a JPA relationship to `User`; this keeps the module simple but leaves referential integrity unenforced at DB level.
 - Report status lifecycle exists as enum only; no worker/task transition engine yet.
 - Notifications are stored and retrievable, but real-time push/WebSocket delivery is deferred to later releases.
@@ -479,7 +479,7 @@ Release 1 final checklist should now read:
 ## Recommended Before Release 2
 
 <!-- - Add Flyway or Liquibase before schema grows further. -->
-- Move secrets out of committed properties and into environment variables.
+- Rotate any Cloudinary credentials that were previously committed.
 - Add a real spatial GiST index for `reports.location`; Hibernate `@Index` does not create the ideal PostGIS spatial index.
 - Add DB foreign keys or explicit integrity strategy for `Report.citizenId` and `ReportSupport.reportId/userId`.
 - Replace in-memory token blacklist with Redis before scaling beyond one backend instance.
@@ -543,11 +543,11 @@ Required backend environment variables:
 SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/snapfix
 SPRING_DATASOURCE_USERNAME=postgres
 SPRING_DATASOURCE_PASSWORD=password
-JWT_SECRET=your-very-secret-key-that-is-at-least-32-bytes-long
+JWT_SECRET=replace-with-a-random-secret-at-least-32-bytes-long
 JWT_EXPIRATION=900000
-CLOUDINARY_CLOUD_NAME=...
-CLOUDINARY_API_KEY=...
-CLOUDINARY_API_SECRET=...
+CLOUDINARY_CLOUD_NAME=replace-with-cloudinary-cloud-name
+CLOUDINARY_API_KEY=replace-with-cloudinary-api-key
+CLOUDINARY_API_SECRET=replace-with-cloudinary-api-secret
 ```
 
 Docker rules:

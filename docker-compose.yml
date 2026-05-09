@@ -7,8 +7,8 @@ services:
     container_name: snapfix-postgres
     environment:
       POSTGRES_DB: snapfix
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     ports:
       - "5432:5432"
     volumes:
@@ -30,17 +30,17 @@ services:
     environment:
       # Database - use service name 'postgres', not localhost
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/snapfix
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: password
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-password}
 
-      # JWT - must match jwt.secret in application.properties
-      JWT_SECRET: your-very-secret-key-that-is-at-least-32-bytes-long
-      JWT_EXPIRATION: 900000
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev-secret-at-least-32-bytes-long}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-900000}
 
       # Cloudinary
-      CLOUDINARY_CLOUD_NAME: dzko7buka
-      CLOUDINARY_API_KEY: 332922237419981
-      CLOUDINARY_API_SECRET: 665dZKpjsIkKE5p1Zf_5wBhcFFk
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-dev-cloud-name}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-dev-api-key}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-dev-api-secret}
 
 volumes:
   postgres_data:
