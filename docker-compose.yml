@@ -1,0 +1,46 @@
+# version: '3.8'
+
+services:
+
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: snapfix-postgres
+    environment:
+      POSTGRES_DB: snapfix
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    container_name: snapfix-backend
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy   # ← wait for DB to be ready, not just started
+    environment:
+      # Database - use service name 'postgres', not localhost
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/snapfix
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: password
+
+      # JWT - must match jwt.secret in application.properties
+      JWT_SECRET: your-very-secret-key-that-is-at-least-32-bytes-long
+      JWT_EXPIRATION: 900000
+
+      # Cloudinary
+      CLOUDINARY_CLOUD_NAME: dzko7buka
+      CLOUDINARY_API_KEY: 332922237419981
+      CLOUDINARY_API_SECRET: 665dZKpjsIkKE5p1Zf_5wBhcFFk
+
+volumes:
+  postgres_data:
