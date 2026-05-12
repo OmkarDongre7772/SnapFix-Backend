@@ -26,6 +26,21 @@ import lombok.Setter;
         @Index(name = "idx_reports_created_at", columnList = "created_at")
 })
 public class Report {
+    public Report(){
+        
+    }
+
+    public Report(Report report) {
+        this.id = report.getId();
+        this.citizenId = report.getCitizenId();
+        this.category = report.getCategory();
+        this.createdAt = report.getCreatedAt();
+        this.description = report.getDescription();
+        this.imageUrl = report.getImageUrl();
+        this.location = report.getLocation();
+        this.status = report.getStatus();
+        this.supportCount = report.getSupportCount();
+    }
 
     @Id
     @GeneratedValue

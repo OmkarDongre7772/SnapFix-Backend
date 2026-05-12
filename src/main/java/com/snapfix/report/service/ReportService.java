@@ -112,6 +112,10 @@ public class ReportService {
         return mapToResponse(report);
     }
 
+    public Report getReport(UUID id){
+        return reportRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Report not found"));
+    }
+
     @Transactional
     @PreAuthorize("hasRole('CITIZEN')")
     public ReportResponse supportReport(UUID id) {

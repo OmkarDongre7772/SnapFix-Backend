@@ -1,5 +1,8 @@
 package com.snapfix.report.controller;
 
+import com.snapfix.bid.dto.BidResponseDTO;
+import com.snapfix.bid.service.BidService;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -15,14 +18,17 @@ import com.snapfix.report.entity.Category;
 import com.snapfix.report.service.ReportService;
 
 
+
 @RestController
 @RequestMapping("/reports")
 public class ReportController {
 
+    private final BidService bidService;
     private final ReportService reportService;
 
-    public ReportController(ReportService reportService) {
+    public ReportController(ReportService reportService, BidService bidService) {
         this.reportService = reportService;
+        this.bidService = bidService;
     }
 
     //Create Report
@@ -69,4 +75,11 @@ public class ReportController {
 
         return ResponseEntity.ok(reportService.getNearbyReports(lat, lng, radius));
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/{id}/bids")
+    public List<BidResponseDTO> getBidsForReport(@PathVariable UUID id) {
+        return bidService.viewBidsForReportId(id);
+    }
+    
 }
