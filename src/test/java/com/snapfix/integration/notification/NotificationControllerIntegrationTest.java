@@ -147,6 +147,16 @@ public class NotificationControllerIntegrationTest extends BaseIntegrationTest {
     void workerNearbyReports_requiresWorkerRole() throws Exception {
         String citizenToken = registerAndLogin(uniqueEmail("worker-discovery-citizen"), "CITIZEN");
         String workerToken = registerAndLogin(uniqueEmail("worker-discovery-worker"), "WORKER");
+        postJson(
+                "/workers/profile",
+                """
+                        {
+                          "skills": ["electrical"],
+                          "lat": 12.9716,
+                          "lng": 77.5946
+                        }
+                        """,
+                workerToken);
         JsonNode report = objectMapper.readTree(createReport(
                 citizenToken,
                 "Worker-visible report",
@@ -154,8 +164,8 @@ public class NotificationControllerIntegrationTest extends BaseIntegrationTest {
                 12.9716,
                 77.5946).body());
 
-        HttpResponse<String> workerResponse = get("/workers/reports/nearby?lat=12.9716&lng=77.5946", workerToken);
-        HttpResponse<String> citizenResponse = get("/workers/reports/nearby?lat=12.9716&lng=77.5946", citizenToken);
+        HttpResponse<String> workerResponse = get("/workers/reports/nearby", workerToken);
+        HttpResponse<String> citizenResponse = get("/workers/reports/nearby", citizenToken);
         JsonNode workerBody = objectMapper.readTree(workerResponse.body());
 
         assertThat(workerResponse.statusCode()).isEqualTo(200);

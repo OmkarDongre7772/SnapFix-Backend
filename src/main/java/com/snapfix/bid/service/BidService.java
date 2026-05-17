@@ -1,8 +1,10 @@
 package com.snapfix.bid.service;
 
+import com.snapfix.task.service.TaskService;
 import com.snapfix.user.entity.User;
 import com.snapfix.user.service.UserService;
 
+import com.snapfix.worker.service.WorkerService;
 import jakarta.transaction.Transactional;
 
 import java.math.BigDecimal;
@@ -23,6 +25,8 @@ import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.report.entity.Report;
 import com.snapfix.report.entity.ReportStatus;
 import com.snapfix.report.service.ReportService;
+import com.snapfix.task.entity.Task;
+import com.snapfix.task.entity.TaskStatus;
 
 @Service
 public class BidService {
@@ -31,14 +35,18 @@ public class BidService {
      * DECLARATIONS
      */
 
+    private final WorkerService workerService;
+    private final TaskService taskService;
     private final UserService userService;
     private final BidRepository bidRepository;
     private final ReportService reportService;
 
-    BidService(BidRepository bidRepository, UserService userService, ReportService reportService) {
+    BidService(BidRepository bidRepository, UserService userService, ReportService reportService, TaskService taskService, WorkerService workerService) {
         this.bidRepository = bidRepository;
         this.userService = userService;
         this.reportService = reportService;
+        this.taskService = taskService;
+        this.workerService = workerService;
     }
 
     /*
@@ -47,7 +55,12 @@ public class BidService {
 
     @Transactional
     public BidResponseDTO createBid(BidRequestDTO request) {
-
+        if(workerService.getWorkerProfile() == null){
+            throw new IllegalStateException("Cannot create Bid for Worker without Worker Profile");
+        }
+        if(!workerService.getWorkerProfile().isAvailable()){
+            throw new IllegalStateException("Inactive worker cannot Bid, update profile status to Active before Bidding");
+        }
         validateCreateRequest(request);
 
         Report report = reportService.getReport(
@@ -74,7 +87,7 @@ public class BidService {
                 worker,
                 request.getBidAmount(),
                 request.getDurationEstimate(),
-                request.getResourceNote());
+                request.getResourceNote() == null ? "" : request.getResourceNote());
 
         bidRepository.save(bid);
 
@@ -84,7 +97,7 @@ public class BidService {
     @Transactional
     public void withdrawBid(UUID bidId) {
         Bid bid = bidRepository.findById(bidId)
-                .orElseThrow(() -> new RuntimeException("Bid not found or already deleted"));
+                .orElseThrow(() -> new IllegalArgumentException("Bid not found or already deleted"));
 
         if (!bid.getWorker().getId().equals(getCurrentUserId()))
             throw new AccessDeniedException("Invalid Access, Access Denied!");
@@ -107,6 +120,50 @@ public class BidService {
         return response;
     }
 
+    @Transactional
+    public Bid approveBid(UUID bidId) {
+        Bid bid = bidRepository.findById(bidId)
+                .orElseThrow(() -> new IllegalArgumentException("Bid not found"));
+
+        if(bid.getStatus() != BidStatus.ACTIVE){
+            throw new IllegalStateException("Cannot approve non-active or approved bid");
+        }
+        if (bid.getReport().getStatus() != ReportStatus.CREATED) {
+            throw new IllegalStateException("Cannot approve a bid for a report that is already assigned");
+        }
+
+        List<Bid> list = bidRepository.findByReport_Id(bid.getReport().getId());
+        for (Bid b : list) {
+            if (b.getId().equals(bid.getId())) {
+                continue;
+            }
+            b.setStatus(BidStatus.REJECTED);
+            bidRepository.save(b);
+        }
+        bid.setStatus(BidStatus.APPROVED);
+        bidRepository.save(bid);
+
+        Task task = new Task();
+        task.setReport(bid.getReport());
+        task.setWorker(bid.getWorker());
+        task.setStatus(TaskStatus.ASSIGNED);
+        taskService.saveTask(task);
+        bid.getReport().setStatus(ReportStatus.IN_PROGRESS);
+        reportService.saveReport(bid.getReport());
+        return bid;
+    }
+
+    @Transactional
+    public Bid rejectBid(UUID bidId) {
+        Bid bid = bidRepository.findById(bidId)
+                .orElseThrow(() -> new IllegalArgumentException("Bid not found"));
+        if (bid.getStatus() != BidStatus.ACTIVE) {
+            throw new IllegalStateException("Cannot reject non-active bid");
+        }
+        bid.setStatus(BidStatus.REJECTED);
+        return bidRepository.save(bid);
+    }
+
     /*
      * UTILITY FUNCTIONS
      */
@@ -121,10 +178,7 @@ public class BidService {
         if (request.getDurationEstimate() < 0) {
             throw new IllegalArgumentException("Duration Estimate cannot be null or negative");
         }
-        if (request.getResourceNote() == null || request.getResourceNote().isBlank()) {
-            throw new IllegalArgumentException("Resource Note cannot be NULL or Empty");
-        }
-        if (request.getResourceNote().trim().length() > 5000) {
+        if (request.getResourceNote() != null && request.getResourceNote().trim().length() > 5000) {
             throw new IllegalArgumentException("Resource Note cannot be over 5000 alphabets");
         }
     }

@@ -7,6 +7,8 @@ import java.util.stream.Collectors;
 
 import org.locationtech.jts.geom.Point;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -49,7 +51,6 @@ public class ReportService {
         this.userService = userService;
         this.notificationService = notificationService;
     }
-
 
     // Create Report
 
@@ -134,6 +135,7 @@ public class ReportService {
 
     @PreAuthorize("isAuthenticated()")
     public List<ReportResponse> getNearbyReports(double lat, double lng, double radius) {
+        validateLocation(lat, lng);
         return reportRepository.findNearbyReports(lat, lng, radius).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -160,6 +162,21 @@ public class ReportService {
             throw new IllegalArgumentException(duplicateMessage);
         }
     }
+
+    // ADMIN METHOD
+    public Page<ReportResponse> getAllReports(ReportStatus status, Pageable pageable) {
+        Page<Report> reports;
+        if (status != null) {
+            reports = reportRepository.findByStatus(status, pageable);
+        } else {
+            reports = reportRepository.findAll(pageable);
+        }
+        return reports.map(ReportResponse::new);
+    }
+
+    /*
+     * UTILITY FUNCTIONS
+     */
 
     private void validateCreateRequest(ReportRequest request, MultipartFile image) {
         if (image == null || image.isEmpty()) {
@@ -215,5 +232,18 @@ public class ReportService {
         }
 
         return user.getId();
+    }
+
+    public void saveReport(Report report){
+        reportRepository.save(report);
+    }
+
+    private void validateLocation(double lat, double lng){
+        if ( lat  < -90 || lat  > 90) {
+            throw new IllegalArgumentException("Latitude must be between -90 and 90");
+        }
+        if (lng < -180 || lng > 180) {
+            throw new IllegalArgumentException("Longitude must be between -180 and 180");
+        }
     }
 }

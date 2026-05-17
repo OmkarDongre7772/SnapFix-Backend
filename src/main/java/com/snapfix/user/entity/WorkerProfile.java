@@ -4,13 +4,13 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
-
-import com.snapfix.common.entity.Location;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+import org.locationtech.jts.geom.Point;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
-import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -50,8 +50,9 @@ public class WorkerProfile {
     @Column(nullable = false)
     private BigDecimal walletBalance = BigDecimal.ZERO;
 
-    @Embedded
-    private Location currentLocation;
+    @Column(columnDefinition = "geometry(Point, 4326)")
+    @JdbcTypeCode(SqlTypes.GEOMETRY)
+    private Point currentLocation;
 
     @Column(nullable = false)
     private boolean available;

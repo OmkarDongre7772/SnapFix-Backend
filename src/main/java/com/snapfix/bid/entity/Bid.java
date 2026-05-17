@@ -56,7 +56,7 @@ public class Bid {
     @Column(nullable = false)
     private Instant createdAt;
 
-    protected Bid() {
+    public Bid() {
     }
 
     public Bid(Report report, User worker, BigDecimal bidAmount, int durationEstimate, String resourceNote) {

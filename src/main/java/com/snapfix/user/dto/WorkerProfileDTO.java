@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.snapfix.common.entity.Location;
 import com.snapfix.user.entity.WorkerProfile;
 
 import lombok.Getter;
@@ -12,30 +11,34 @@ import lombok.Setter;
 
 @Getter
 @Setter
-public class WorkerProfileDTO implements ProfileDTO{
-    
+public class WorkerProfileDTO implements ProfileDTO {
+
     private String name;
     private List<String> skills;
     private Double rating;
     private int completedTasks = 0;
     private BigDecimal walletBalance;
-    private Location currentLocation;
+    private Double lat;
+    private Double lng;
     private boolean available;
 
-/*
-    CONSTRUCTORS
-*/
+    /*
+     * CONSTRUCTORS
+     */
     public WorkerProfileDTO() {
     }
+
     public WorkerProfileDTO(WorkerProfile worker) {
         this.name = worker.getName();
-        this.skills = new ArrayList<>(worker.getSkills());
+        this.skills = worker.getSkills() == null ? new ArrayList<>() : new ArrayList<>(worker.getSkills());
         this.rating = worker.getRating();
         this.completedTasks = worker.getCompletedTasks();
         this.walletBalance = worker.getWalletBalance();
-        this.currentLocation = worker.getCurrentLocation();
+        if (worker.getCurrentLocation() != null) {
+            this.lat = worker.getCurrentLocation().getY();
+            this.lng = worker.getCurrentLocation().getX();
+        }
         this.available = worker.isAvailable();
     }
 
-    
 }

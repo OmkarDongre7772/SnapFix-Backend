@@ -9,6 +9,7 @@ import com.snapfix.worker.dto.UpdateLocationRequest;
 import com.snapfix.worker.dto.UpdateWorkerProfileRequest;
 import com.snapfix.worker.service.WorkerService;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
@@ -18,7 +19,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 import com.snapfix.common.entity.Location;
 import com.snapfix.report.dto.ReportResponse;
-// import com.snapfix.user.dto.ProfileDTO;
+import com.snapfix.task.dto.TaskResponse;
+import com.snapfix.task.entity.Task;
 import com.snapfix.user.dto.WorkerProfileDTO;
 
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,12 +47,10 @@ public class WorkerController {
 
     @PreAuthorize("hasRole('WORKER')")
     @GetMapping("/reports/nearby")
-    public ResponseEntity<List<ReportResponse>> getNearByReports(
-            @RequestParam Double lat,
-            @RequestParam Double lng) {
+    public ResponseEntity<List<ReportResponse>> getNearByReports() {
 
         return ResponseEntity.ok(
-                workerService.getNearbyReports(new Location(lat, lng)));
+                workerService.getNearbyReports());
     }
 
     @PreAuthorize("hasRole('WORKER')")
@@ -94,5 +94,17 @@ public class WorkerController {
 
         return ResponseEntity.ok().build();
     }
+
+    @PreAuthorize("hasRole('WORKER')")
+    @GetMapping("/tasks")
+    public ResponseEntity<List<TaskResponse>> getAssignedTasks() {
+        List<Task> tasks = workerService.getAssignedTasks();
+        List<TaskResponse> response = new ArrayList<>();
+        for (Task task : tasks) {
+                response.add(TaskResponse.mapTask(task));
+        }
+        return ResponseEntity.ok(response);
+    }
+
 
 }

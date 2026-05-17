@@ -133,6 +133,13 @@ public class UserService {
         if (worker.getSkills() != null) {
             dto.setSkills(new ArrayList<>(worker.getSkills()));
         }
+        dto.setCompletedTasks(worker.getCompletedTasks());
+        dto.setWalletBalance(worker.getWalletBalance());
+        dto.setAvailable(worker.isAvailable());
+        if (worker.getCurrentLocation() != null) {
+            dto.setLat(worker.getCurrentLocation().getY());
+            dto.setLng(worker.getCurrentLocation().getX());
+        }
         return dto;
     }
 
