@@ -1,13 +1,13 @@
 # SnapFix Backend
 
-> Civic infrastructure platform with geospatial reporting, JWT security, PostGIS-powered discovery, worker bidding, admin task assignment, and a roadmap toward event-driven AI architecture.
+> Civic infrastructure platform with geospatial reporting, JWT security, PostGIS-powered discovery, worker bidding, proof upload, citizen verification, and a roadmap toward event-driven AI architecture.
 
 ![Java](https://img.shields.io/badge/Java-21-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0.6-brightgreen)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-PostGIS-blue)
-![Tests](https://img.shields.io/badge/Tests-33_Passing-success)
+![Tests](https://img.shields.io/badge/Tests-44_Passing-success)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
-![Release](https://img.shields.io/badge/Release-v2.0.0-purple)
+![Release](https://img.shields.io/badge/Release-v3.0.0_Phase_2-purple)
 
 ---
 
@@ -40,9 +40,17 @@ Release 2 adds the worker marketplace flow:
 - The system creates an assigned task automatically
 - Assigned workers move tasks from `ASSIGNED` to `IN_PROGRESS`
 
+Release 3 Phase 1 and Phase 2 add completion verification:
+
+- Assigned workers upload proof of work with image, GPS point and remarks
+- Proof submission moves tasks from `IN_PROGRESS` to `PROOF_SUBMITTED`
+- Proof visibility is limited to assigned worker, report citizen and admin
+- Report citizens verify or reject submitted proof
+- Rejection increments retry count and enforces the max retry rule
+
 This repository contains the Spring Boot backend for:
 
-# Release 2 - Worker Marketplace and Task Assignment
+# Release 3 - Completion and Verification
 
 ---
 
@@ -72,7 +80,9 @@ The long-term goal is to evolve SnapFix from a modular monolith into a productio
 | Phase 3 - Civic Report System | Complete |
 | Phase 4 - Discovery and Notifications | Complete |
 | Release 2 - Worker Marketplace and Task Assignment | Complete |
-| Latest Test Result | `.\mvnw.cmd test` - 33 tests passing |
+| Release 3 Phase 1 - Proof of Work Upload | Complete |
+| Release 3 Phase 2 - Citizen Verification and Retry | Complete |
+| Latest Test Result | `.\mvnw.cmd test` - 44 tests passing |
 
 ---
 
@@ -99,6 +109,8 @@ flowchart LR
     API --> Bid[Bid Module]
     API --> AdminModule[Admin Module]
     API --> Task[Task Module]
+    API --> Proof[Proof Module]
+    API --> Verification[Verification Module]
     API --> Storage[Storage Module]
     API --> Geo[Geo Module]
 
@@ -110,6 +122,8 @@ flowchart LR
     Bid --> DB
     AdminModule --> DB
     Task --> DB
+    Proof --> DB
+    Verification --> DB
 
     Storage --> Cloudinary[(Cloudinary)]
 
@@ -166,6 +180,9 @@ timeline
 - Worker marketplace with bid placement, withdrawal and duplicate prevention
 - Admin approval flow that rejects competing bids and creates one task
 - Task ownership enforcement for worker task access
+- Proof-of-work upload with Cloudinary image, PostGIS GPS point and remarks
+- Citizen verification and rejection for submitted proof
+- Retry count enforcement with max retry protection
 - Structured validation and exception responses
 - Dockerized local development
 - PostgreSQL/PostGIS integration tests using Testcontainers
@@ -207,6 +224,10 @@ timeline
 - Admin bid approval and rejection
 - Automatic task creation on bid approval
 - Worker task listing and `ASSIGNED -> IN_PROGRESS` transition
+- Worker proof upload and `IN_PROGRESS -> PROOF_SUBMITTED` transition
+- Proof viewing for assigned worker, report citizen and admin
+- Citizen proof verification and rejection
+- Retry count increment on rejection with max retry protection
 - Structured validation and authorization error responses
 
 ---
@@ -258,6 +279,35 @@ flowchart TD
     F --> H
     H --> I
     H --> J
+```
+
+---
+
+# Proof and Verification Flow
+
+```mermaid
+flowchart TD
+
+    A[Worker Starts Assigned Task]
+    B[Worker Uploads Proof]
+    C[Store Proof Image In Cloudinary]
+    D[Store Proof Metadata In PostgreSQL + PostGIS]
+    E[Task Moves To PROOF_SUBMITTED]
+    F[Citizen Reviews Proof]
+    G{Citizen Decision}
+    H[Task Moves To VERIFIED_BY_CITIZEN]
+    I[Task Moves To REJECTED]
+    J[Retry Count Increments]
+
+    A --> B
+    B --> C
+    B --> D
+    D --> E
+    E --> F
+    F --> G
+    G -->|VERIFIED| H
+    G -->|REJECTED| I
+    I --> J
 ```
 
 ---
@@ -339,6 +389,8 @@ erDiagram
     USER ||--o{ ADMIN_ACTION_LOG : performs
     REPORT ||--o{ BID : receives
     REPORT ||--o| TASK : creates
+    TASK ||--o| PROOF : receives
+    TASK ||--o| VERIFICATION : receives
 
     USER {
         UUID id
@@ -370,6 +422,21 @@ erDiagram
         String status
     }
 
+    PROOF {
+        UUID id
+        UUID taskId
+        UUID workerId
+        Point gpsLocation
+        String imageUrl
+    }
+
+    VERIFICATION {
+        UUID id
+        UUID taskId
+        UUID citizenId
+        String status
+    }
+
     NOTIFICATION {
         UUID id
         UUID recipientId
@@ -393,6 +460,8 @@ src/main/java/com/snapfix/
   notification/  stored notifications and read state
   worker/        worker profile, location, discovery and task APIs
   task/          assigned task lifecycle
+  proof/         worker proof-of-work uploads
+  verification/  citizen proof verification and rejection
   storage/       Cloudinary image upload abstraction
   geo/           PostGIS/JTS helpers
   common/        shared entities, exceptions and utilities
@@ -409,7 +478,7 @@ src/main/java/com/snapfix/
 | Nearby Search Query | < 200ms |
 | Geo Query Test Dataset | 1,000 reports |
 | Concurrent Users | 100 |
-| Test Coverage | 75%+ for Release 2 target |
+| Test Coverage | 75%+ for Release 3 Phase 2 target |
 
 ---
 
@@ -504,7 +573,7 @@ Docker Desktop must be running because integration tests use Testcontainers with
 Latest verified result:
 
 ```text
-Tests run: 33
+Tests run: 44
 Failures: 0
 Errors: 0
 Skipped: 0
@@ -620,6 +689,25 @@ lng         longitude
 |---|---|---|---|
 | GET | `/tasks/{id}` | Assigned WORKER | Get task detail |
 | PATCH | `/tasks/{id}/start` | Assigned WORKER | Move task to `IN_PROGRESS` |
+| POST | `/tasks/{taskId}/proof` | Assigned WORKER | Upload proof for an in-progress task |
+| GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN | View proof |
+| POST | `/tasks/{taskId}/verify?status=` | Report CITIZEN | Verify or reject submitted proof |
+
+`POST /tasks/{taskId}/proof` expects multipart form data:
+
+```text
+image   file
+lat     proof latitude
+lng     proof longitude
+remarks optional worker notes
+```
+
+`POST /tasks/{taskId}/verify` accepts:
+
+```text
+status   VERIFIED | REJECTED
+comments optional citizen comments
+```
 
 ---
 
@@ -675,6 +763,22 @@ USING GIST(location);
 
 ---
 
+# Release 3 Verification Flow
+
+1. Worker starts assigned task with `PATCH /tasks/{id}/start`
+2. Worker uploads proof with `POST /tasks/{taskId}/proof`
+3. Proof stores image URL, GPS point, remarks, worker and task
+4. Task moves to `PROOF_SUBMITTED`
+5. Report citizen reviews proof with `GET /tasks/{taskId}/proof`
+6. Citizen verifies with `POST /tasks/{taskId}/verify?status=VERIFIED`
+7. Verified task moves to `VERIFIED_BY_CITIZEN`
+8. Citizen may reject with `status=REJECTED`
+9. Rejected task moves to `REJECTED`
+10. Rejection increments `retryCount`
+11. Rejection is blocked when `retryCount >= 3`
+
+---
+
 # Current Known Limitations
 
 - `.env` is ignored; `.env.example` is committed
@@ -683,8 +787,25 @@ USING GIST(location);
 - WebSocket push notifications are planned for Release 4
 - `reports.location` still needs explicit GiST indexing for production-scale data
 - Some UUID relationships are not yet full foreign keys
-- Release 3 proof, verification, retry, payment, wallet and rating workflows are not implemented
+- Release 3 payment, wallet and rating workflows are not implemented
+- Verification auto-approval exists as a scheduled foundation but needs production policy review
 - Docker Compose smoke test still needs recording
+
+---
+
+# Release 3 Phase 1 and 2 Bugs and Fixes
+
+| Issue | Fix |
+|---|---|
+| Missing proof image returned generic 500 | Map missing multipart parts to 400 |
+| Proof upload originally returned only boolean | Return `ProofResponse` with saved metadata |
+| Any authenticated role could view proof by task id | Enforce assigned worker, report citizen or admin ownership |
+| Citizen verification used worker-only task lookup | Add neutral task lookup for ownership checks |
+| Verification changed task status before checking source status | Validate `PROOF_SUBMITTED` before mutation |
+| Verification stored task id as citizen id | Store report owner citizen id |
+| Rejection with comments incorrectly verified task | Branch explicitly on `VERIFIED` vs `REJECTED` |
+| Rejections could continue indefinitely | Block rejection when retry count reaches 3 |
+| Older integration cleanup ignored new child tables | Delete verification, proof, task and bid rows before reports |
 
 ---
 
@@ -757,7 +878,7 @@ flowchart LR
 - Retry workflow
 - Payment and wallet
 - Worker ratings
-- Status: Next
+- Status: Phase 1 and Phase 2 complete; payment, wallet and ratings pending
 
 ---
 

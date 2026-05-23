@@ -1,8 +1,6 @@
 package com.snapfix.admin.service;
 
 import com.snapfix.bid.entity.Bid;
-import com.snapfix.bid.entity.BidStatus;
-import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.bid.service.BidService;
 import com.snapfix.user.entity.User;
 
@@ -11,7 +9,6 @@ import com.snapfix.user.service.UserService;
 import jakarta.transaction.Transactional;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 import org.springframework.security.core.Authentication;

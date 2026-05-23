@@ -2,13 +2,17 @@ package com.snapfix.integration.report;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.common.BaseIntegrationTest;
+import com.snapfix.proof.repository.ProofRepository;
 import com.snapfix.report.entity.Category;
 import com.snapfix.report.entity.Report;
 import com.snapfix.report.entity.ReportStatus;
 import com.snapfix.report.repository.ReportRepository;
 import com.snapfix.report.repository.ReportSupportRepository;
 import com.snapfix.storage.service.StorageService;
+import com.snapfix.task.repository.TaskRepository;
+import com.snapfix.verification.repository.VerificationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -52,12 +56,28 @@ public class ReportControllerIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private ReportSupportRepository reportSupportRepository;
 
+    @Autowired
+    private BidRepository bidRepository;
+
+    @Autowired
+    private ProofRepository proofRepository;
+
+    @Autowired
+    private TaskRepository taskRepository;
+
+    @Autowired
+    private VerificationRepository verificationRepository;
+
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final GeometryFactory geometryFactory = new GeometryFactory();
 
     @BeforeEach
     void setUp() {
+        verificationRepository.deleteAll();
+        proofRepository.deleteAll();
+        taskRepository.deleteAll();
+        bidRepository.deleteAll();
         reportSupportRepository.deleteAll();
         reportRepository.deleteAll();
         reset(storageService);

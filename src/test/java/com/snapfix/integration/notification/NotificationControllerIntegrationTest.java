@@ -2,11 +2,15 @@ package com.snapfix.integration.notification;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.common.BaseIntegrationTest;
 import com.snapfix.notification.repository.NotificationRepository;
+import com.snapfix.proof.repository.ProofRepository;
 import com.snapfix.report.repository.ReportRepository;
 import com.snapfix.report.repository.ReportSupportRepository;
 import com.snapfix.storage.service.StorageService;
+import com.snapfix.task.repository.TaskRepository;
+import com.snapfix.verification.repository.VerificationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -45,11 +49,27 @@ public class NotificationControllerIntegrationTest extends BaseIntegrationTest {
     @Autowired
     private ReportRepository reportRepository;
 
+    @Autowired
+    private BidRepository bidRepository;
+
+    @Autowired
+    private ProofRepository proofRepository;
+
+    @Autowired
+    private TaskRepository taskRepository;
+
+    @Autowired
+    private VerificationRepository verificationRepository;
+
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
+        verificationRepository.deleteAll();
+        proofRepository.deleteAll();
+        taskRepository.deleteAll();
+        bidRepository.deleteAll();
         notificationRepository.deleteAll();
         reportSupportRepository.deleteAll();
         reportRepository.deleteAll();

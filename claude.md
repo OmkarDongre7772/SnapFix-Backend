@@ -1,6 +1,6 @@
 # SnapFix - AI Assistant Context
 
-This file reflects the current backend state after Release 2 completion.
+This file reflects the current backend state after Release 3 Phase 2 completion.
 
 ## Current Development Stage
 
@@ -8,10 +8,10 @@ This file reflects the current backend state after Release 2 completion.
 | --- | --- |
 | Product | SnapFix Backend |
 | Architecture | Modular monolith |
-| Current release | Release 2 - Worker Marketplace and Task Assignment |
-| Status | Release 1 and Release 2 backend scope complete |
+| Current release | Release 3 - Completion and Verification |
+| Status | Release 1, Release 2, and Release 3 Phase 1-2 backend scope complete |
 | Latest verification | `.\mvnw.cmd test` |
-| Latest result | 33 tests, 0 failures, 0 errors |
+| Latest result | 44 tests, 0 failures, 0 errors |
 
 ## Modules
 
@@ -24,6 +24,8 @@ worker
 bid
 admin
 task
+proof
+verification
 storage
 geo
 common
@@ -33,7 +35,7 @@ config
 Future modules:
 
 ```text
-proof / verification / payment / wallet / rating / event / ai / analytics
+payment / wallet / rating / event / ai / analytics
 ```
 
 ## Rules To Preserve
@@ -44,6 +46,7 @@ proof / verification / payment / wallet / rating / event / ai / analytics
 - DTOs must not expose entities directly.
 - Use `@PreAuthorize("hasRole('X')")`, not `hasAuthority`.
 - Use `IllegalArgumentException` for 400 and `IllegalStateException` for 409.
+- Missing multipart request parts should return 400.
 - For PostGIS/JTS points, longitude is `x` and latitude is `y`.
 - `GeoUtil.createPoint(lat, lng)` must store `Coordinate(lng, lat)`.
 
@@ -108,6 +111,9 @@ proof / verification / payment / wallet / rating / event / ai / analytics
 | --- | --- | --- |
 | GET | `/tasks/{id}` | Assigned WORKER |
 | PATCH | `/tasks/{id}/start` | Assigned WORKER |
+| POST | `/tasks/{taskId}/proof` | Assigned WORKER |
+| GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN |
+| POST | `/tasks/{taskId}/verify?status=VERIFIED|REJECTED` | Report CITIZEN |
 
 ### Notifications
 
@@ -140,6 +146,23 @@ proof / verification / payment / wallet / rating / event / ai / analytics
 - Worker can move own task to `IN_PROGRESS`.
 - `retryCount` defaults to 0 for Release 3 retry logic.
 
+### Proof
+
+- One proof per task through unique `task_id`.
+- Assigned worker uploads proof only when task is `IN_PROGRESS`.
+- Proof stores image URL, PostGIS GPS point, remarks, worker and task.
+- Proof upload moves task to `PROOF_SUBMITTED`.
+- Proof viewing is limited to assigned worker, report citizen and admin.
+
+### Verification
+
+- One verification per task through unique `task_id`.
+- Report citizen can verify or reject only after proof is submitted.
+- `VERIFIED` moves task to `VERIFIED_BY_CITIZEN`.
+- `REJECTED` moves task to `REJECTED` and increments retry count.
+- Rejection is blocked once retry count reaches 3.
+- Verification stores task id, citizen id, status, comments and timestamp.
+
 ### AdminActionLog
 
 - Written for admin approve/reject decisions.
@@ -160,6 +183,26 @@ ADMIN -> POST /admin/bids/{bidId}/approve
 
 If task creation fails, the approval transaction must roll back.
 
+## Release 3 Verification Flow
+
+```text
+WORKER -> PATCH /tasks/{taskId}/start
+  -> task ASSIGNED -> IN_PROGRESS
+
+WORKER -> POST /tasks/{taskId}/proof
+  -> validate assigned worker
+  -> validate task IN_PROGRESS
+  -> upload image through StorageService
+  -> save proof image URL, GPS point and remarks
+  -> task IN_PROGRESS -> PROOF_SUBMITTED
+
+CITIZEN -> POST /tasks/{taskId}/verify?status=VERIFIED|REJECTED
+  -> validate report citizen owns task report
+  -> validate task PROOF_SUBMITTED
+  -> VERIFIED -> task VERIFIED_BY_CITIZEN
+  -> REJECTED -> task REJECTED and retryCount + 1
+```
+
 ## Test Coverage
 
 Latest command:
@@ -171,14 +214,16 @@ Latest command:
 Latest result:
 
 ```text
-Tests run: 33, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
-Release 2 tests:
+Release tests:
 
 ```text
 src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase1ProofIntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegrationTest.java
 ```
 
 Coverage includes:
@@ -188,6 +233,8 @@ Coverage includes:
 - Bid placement, duplicate rejection, optional resource note and withdrawal.
 - Admin approval, competing bid rejection, task creation, report status update and admin log.
 - Task ownership and `ASSIGNED -> IN_PROGRESS`.
+- Proof upload, proof ownership and `IN_PROGRESS -> PROOF_SUBMITTED`.
+- Citizen verification, rejection, retry count and max retry protection.
 
 ## Release 2 Bugs and Fixes
 
@@ -204,6 +251,18 @@ Coverage includes:
 | Task retry default was 3 | Retry count should start at 0 | Default changed to 0 |
 | Report response lat/lng reversed in one constructor | JTS x/y confusion | Map `lat = y`, `lng = x` |
 
+## Release 3 Phase 1 and 2 Bugs and Fixes
+
+| Bug | Cause | Fix |
+| --- | --- | --- |
+| Missing proof image returned 500 | Missing multipart exception was handled generically | Map missing request parts to 400 |
+| Proof access leaked by task id | Role check without task ownership check | Allow assigned worker, report citizen or admin only |
+| Citizen verification failed ownership checks | Used worker-only task lookup | Added neutral task lookup for verification |
+| Valid verification failed after status mutation | Checked source state after changing task status | Validate `PROOF_SUBMITTED` before mutation |
+| Verification saved task id as citizen id | Wrong UUID assigned | Store report owner citizen id |
+| Rejection with comments verified task | Branch used comments to decide status | Branch only on requested verification status |
+| Rejections had no upper bound | Retry rule was not enforced | Block rejection when `retryCount >= 3` |
+
 ## Known Limitations
 
 - No Flyway/Liquibase yet.
@@ -211,15 +270,13 @@ Coverage includes:
 - Report location should get explicit GiST index.
 - Report ownership uses UUID field instead of full FK relationship.
 - Real-time notification push is deferred.
-- Release 3 proof, verification, retry, payment, wallet and rating flows are not implemented.
+- Release 3 payment, wallet and rating flows are not implemented.
+- Auto-verification scheduling exists but needs production policy review.
 
 ## Next Release
 
-Release 3 should implement:
+Release 3 remaining work:
 
-- Proof upload for tasks in `IN_PROGRESS`.
-- Citizen verification/rejection.
-- Retry flow with max 3 retries.
 - Admin final approval.
 - Payment and wallet transactions.
 - Worker rating updates.

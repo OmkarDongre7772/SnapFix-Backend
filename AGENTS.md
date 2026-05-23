@@ -1,13 +1,14 @@
 # SnapFix - AI Assistant Context
 
 Use this file as the current project truth for coding agents. Older reference PDFs and generated
-status notes may be stale; the code and this file reflect the Release 2 completion state.
+status notes may be stale; the code and this file reflect the Release 3 Phase 2 completion state.
 
 ## Project Overview
 
 SnapFix is a civic infrastructure reporting platform. Citizens report issues such as potholes,
 garbage, broken streetlights, water leaks and road damage. Workers discover nearby reports, place
-bids, and receive assigned tasks after admin approval.
+bids, receive assigned tasks after admin approval, upload proof of work, and citizens verify or
+reject completed work.
 
 This repository contains the SnapFix Spring Boot backend.
 
@@ -15,11 +16,13 @@ This repository contains the SnapFix Spring Boot backend.
 
 | Field | Value |
 | --- | --- |
-| Current release | Release 2 - Worker Marketplace and Task Assignment |
+| Current release | Release 3 - Completion and Verification |
 | Release 1 | Complete |
 | Release 2 | Complete |
+| Release 3 Phase 1 | Complete |
+| Release 3 Phase 2 | Complete |
 | Latest verification | `.\mvnw.cmd test` |
-| Latest result | 33 tests, 0 failures, 0 errors |
+| Latest result | 44 tests, 0 failures, 0 errors |
 
 ## Tech Stack
 
@@ -45,6 +48,8 @@ worker
 bid
 admin
 task
+proof
+verification
 storage
 geo
 common
@@ -54,8 +59,6 @@ config
 Future modules:
 
 ```text
-proof
-verification
 payment
 wallet
 rating
@@ -87,6 +90,7 @@ dto        -> request/response model, never expose entities directly
 - `IllegalArgumentException` maps to 400.
 - `IllegalStateException` maps to 409.
 - Access-denied exceptions map to 403.
+- Missing multipart request parts map to 400.
 - Do not throw raw `RuntimeException` from services.
 
 ## Geo Rules
@@ -144,6 +148,27 @@ dto        -> request/response model, never expose entities directly
 - `GET /tasks/{id}` allows only the assigned worker to fetch task detail.
 - `PATCH /tasks/{id}/start` moves assigned task from `ASSIGNED` to `IN_PROGRESS`.
 
+## Implemented Release 3 Scope
+
+### Proof of Work
+
+- `POST /tasks/{taskId}/proof` allows only the assigned worker to upload proof.
+- Proof upload requires task status `IN_PROGRESS`.
+- Proof stores Cloudinary image URL, PostGIS GPS point, remarks, task and worker.
+- Successful proof upload moves task from `IN_PROGRESS` to `PROOF_SUBMITTED`.
+- One proof per task is enforced.
+- `GET /tasks/{taskId}/proof` allows only assigned worker, report citizen or admin.
+
+### Citizen Verification and Retry
+
+- `POST /tasks/{taskId}/verify?status=VERIFIED` lets the report citizen accept proof.
+- Verified tasks move to `VERIFIED_BY_CITIZEN`.
+- `POST /tasks/{taskId}/verify?status=REJECTED` lets the report citizen reject proof.
+- Rejected tasks move to `REJECTED`.
+- Rejection increments `Task.retryCount`.
+- Rejection is blocked once `retryCount >= 3`.
+- Verification records store task id, citizen id, status, comments and timestamp.
+
 ## Release 2 Final Checklist
 
 - [x] Worker profile and PostGIS location tracking working
@@ -154,6 +179,19 @@ dto        -> request/response model, never expose entities directly
 - [x] Worker can view task and mark it `IN_PROGRESS`
 - [x] AdminActionLog records admin decisions
 - [x] Release 2 integration tests added
+
+## Release 3 Phase 1 and 2 Checklist
+
+- [x] Worker can upload proof for an in-progress assigned task
+- [x] Proof upload persists image URL, GPS point, remarks, worker and task
+- [x] Task moves to `PROOF_SUBMITTED` after proof upload
+- [x] Proof viewing is limited to assigned worker, report citizen and admin
+- [x] Report citizen can verify submitted proof
+- [x] Report citizen can reject submitted proof
+- [x] Rejection increments retry count
+- [x] Max retry protection blocks rejection at 3 retries
+- [x] Release 3 Phase 1 integration tests added
+- [x] Release 3 Phase 2 integration tests added
 
 ## Current APIs
 
@@ -194,6 +232,9 @@ dto        -> request/response model, never expose entities directly
 | POST | `/admin/bids/{bidId}/reject` | ADMIN |
 | GET | `/tasks/{id}` | Assigned WORKER |
 | PATCH | `/tasks/{id}/start` | Assigned WORKER |
+| POST | `/tasks/{taskId}/proof` | Assigned WORKER |
+| GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN |
+| POST | `/tasks/{taskId}/verify?status=VERIFIED|REJECTED` | Report CITIZEN |
 
 ## Release 2 Bugs and Fixes
 
@@ -227,6 +268,29 @@ dto        -> request/response model, never expose entities directly
 10. Report response lat/lng were reversed in a constructor.
     - Fixed with `lat = point.getY()` and `lng = point.getX()`.
 
+## Release 3 Phase 1 and 2 Bugs and Fixes
+
+1. Missing proof image returned a generic 500.
+   - Fixed by mapping missing multipart request parts to 400.
+
+2. Proof view endpoint had role checks but no ownership checks.
+   - Fixed by allowing only assigned worker, report citizen or admin.
+
+3. Verification used worker-only task lookup.
+   - Fixed by using neutral task lookup for citizen-owned verification.
+
+4. Verification changed task status before checking `PROOF_SUBMITTED`.
+   - Fixed by validating source state before mutating task status.
+
+5. Verification stored task id as citizen id.
+   - Fixed by storing the report owner citizen id.
+
+6. Rejection with comments could incorrectly verify a task.
+   - Fixed by branching explicitly on `VERIFIED` and `REJECTED`.
+
+7. Rejections had no retry limit.
+   - Fixed by blocking rejection when retry count reaches 3.
+
 ## Test Coverage
 
 Latest command:
@@ -238,14 +302,16 @@ Latest command:
 Latest result:
 
 ```text
-Tests run: 33, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
-Release 2 test file:
+Release test files:
 
 ```text
 src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase1ProofIntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegrationTest.java
 ```
 
 ## Known Limitations
@@ -254,7 +320,8 @@ src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
 - In-memory access-token blacklist should move to Redis later.
 - Add explicit GiST index for `reports.location` before production data volumes.
 - Real-time notification delivery is deferred.
-- Release 3 proof, citizen verification, retry, payment, wallet and rating flows are not implemented.
+- Release 3 payment, wallet and rating flows are not implemented.
+- Auto-verification scheduling exists as a foundation but needs final production policy review.
 
 ## Roadmap
 
@@ -262,6 +329,6 @@ src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
 | --- | --- | --- |
 | Release 1 | Civic Reporting Foundation | Complete |
 | Release 2 | Worker Marketplace and Task Assignment | Complete |
-| Release 3 | Completion, Verification and Payment | Next |
+| Release 3 | Completion, Verification and Payment | Phase 1 and 2 Complete |
 | Release 4 | AI Intelligence and Event-Driven Architecture | Planned |
 | Release 5 | Production Hardening and Scalability | Planned |

@@ -8,6 +8,7 @@ import com.snapfix.bid.entity.BidStatus;
 import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.common.BaseIntegrationTest;
 import com.snapfix.notification.repository.NotificationRepository;
+import com.snapfix.proof.repository.ProofRepository;
 import com.snapfix.report.entity.Report;
 import com.snapfix.report.entity.ReportStatus;
 import com.snapfix.report.repository.ReportRepository;
@@ -17,6 +18,7 @@ import com.snapfix.task.entity.Task;
 import com.snapfix.task.entity.TaskStatus;
 import com.snapfix.task.repository.TaskRepository;
 import com.snapfix.user.repository.WorkerProfileRepository;
+import com.snapfix.verification.repository.VerificationRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,7 +28,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
+// import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -58,6 +60,9 @@ public class Release2IntegrationTest extends BaseIntegrationTest {
     private NotificationRepository notificationRepository;
 
     @Autowired
+    private ProofRepository proofRepository;
+
+    @Autowired
     private ReportRepository reportRepository;
 
     @Autowired
@@ -67,6 +72,9 @@ public class Release2IntegrationTest extends BaseIntegrationTest {
     private TaskRepository taskRepository;
 
     @Autowired
+    private VerificationRepository verificationRepository;
+
+    @Autowired
     private WorkerProfileRepository workerProfileRepository;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -74,6 +82,8 @@ public class Release2IntegrationTest extends BaseIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        verificationRepository.deleteAll();
+        proofRepository.deleteAll();
         adminRepository.deleteAll();
         taskRepository.deleteAll();
         bidRepository.deleteAll();
@@ -85,7 +95,8 @@ public class Release2IntegrationTest extends BaseIntegrationTest {
                 .thenReturn("https://cdn.snapfix.test/release2-report.jpg");
     }
 
-    @Test
+    @SuppressWarnings("unchecked")
+@Test
     @DisplayName("Worker can complete profile, update PostGIS location, and discover nearby reports from stored location")
     void workerProfileLocationAndNearbyDiscovery_workEndToEnd() throws Exception {
         String citizenToken = registerAndLogin(uniqueEmail("r2-citizen"), "CITIZEN");

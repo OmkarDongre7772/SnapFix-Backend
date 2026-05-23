@@ -1,5 +1,6 @@
 package com.snapfix.task.service;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.security.access.AccessDeniedException;
@@ -49,6 +50,11 @@ public class TaskService {
         if (!task.getWorker().getId().equals(getCurrentUserId())) {
             throw new AccessDeniedException("Task is not assigned to current worker");
         }
+    }
+    
+    public Task getTaskById(UUID id) {
+        return taskRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Task not found"));
     }
 
     public Task getTask(UUID id) {

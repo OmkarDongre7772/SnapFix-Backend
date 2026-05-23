@@ -7,8 +7,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestControllerAdvice
@@ -46,6 +48,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> handleIllegalArgument(IllegalArgumentException ex) {
+        ApiError error = new ApiError(ex.getMessage(), 400, System.currentTimeMillis());
+        return ResponseEntity.status(400).body(error);
+    }
+
+    @ExceptionHandler({ MissingServletRequestPartException.class, MissingServletRequestParameterException.class })
+    public ResponseEntity<ApiError> handleMissingRequestPart(Exception ex) {
         ApiError error = new ApiError(ex.getMessage(), 400, System.currentTimeMillis());
         return ResponseEntity.status(400).body(error);
     }
