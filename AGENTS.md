@@ -1,7 +1,7 @@
 # SnapFix - AI Assistant Context
 
 Use this file as the current project truth for coding agents. Older reference PDFs and generated
-status notes may be stale; the code and this file reflect the Release 3 Phase 2 completion state.
+status notes may be stale; the code and this file reflect the Release 3 Phase 4 completion state.
 
 ## Project Overview
 
@@ -21,8 +21,12 @@ This repository contains the SnapFix Spring Boot backend.
 | Release 2 | Complete |
 | Release 3 Phase 1 | Complete |
 | Release 3 Phase 2 | Complete |
-| Latest verification | `.\mvnw.cmd test` |
-| Latest result | 44 tests, 0 failures, 0 errors |
+| Release 3 Phase 3 | Complete |
+| Release 3 Phase 4 | Complete |
+| Latest full verification | `.\mvnw.cmd test` |
+| Latest full result |
+| Latest successful full result | 44 tests, 0 failures, 0 errors |
+| Current test suite size | 51 tests |
 
 ## Tech Stack
 
@@ -159,15 +163,28 @@ dto        -> request/response model, never expose entities directly
 - One proof per task is enforced.
 - `GET /tasks/{taskId}/proof` allows only assigned worker, report citizen or admin.
 
-### Citizen Verification and Retry
+### Citizen Verification and Worker Retry
 
 - `POST /tasks/{taskId}/verify?status=VERIFIED` lets the report citizen accept proof.
 - Verified tasks move to `VERIFIED_BY_CITIZEN`.
 - `POST /tasks/{taskId}/verify?status=REJECTED` lets the report citizen reject proof.
 - Rejected tasks move to `REJECTED`.
-- Rejection increments `Task.retryCount`.
-- Rejection is blocked once `retryCount >= 3`.
+- Citizen rejection does not increment `Task.retryCount`; retry count tracks worker retry attempts.
+- `POST /tasks/{taskId}/retry` lets the assigned worker retry a rejected task.
+- Worker retry moves the task from `REJECTED` back to `IN_PROGRESS`.
+- Worker retry increments `Task.retryCount`.
+- Retry is blocked once `retryCount >= 3`.
 - Verification records store task id, citizen id, status, comments and timestamp.
+
+### Admin Final Review and Reassignment
+
+- `GET /admin/tasks` lists tasks, optionally filtered by `TaskStatus`.
+- `GET /admin/tasks/{id}` returns task, proof and verification detail.
+- `POST /admin/tasks/{taskId}/approve` allows admin final approval after citizen verification.
+- Admin approval moves task to `COMPLETED` and report to `COMPLETED`.
+- `POST /admin/tasks/{taskId}/reject` rejects a citizen-verified task.
+- `POST /admin/tasks/{taskId}/reassign` assigns an incomplete task to a new worker.
+- Admin task decisions write `AdminActionLog`.
 
 ## Release 2 Final Checklist
 
@@ -188,10 +205,24 @@ dto        -> request/response model, never expose entities directly
 - [x] Proof viewing is limited to assigned worker, report citizen and admin
 - [x] Report citizen can verify submitted proof
 - [x] Report citizen can reject submitted proof
-- [x] Rejection increments retry count
-- [x] Max retry protection blocks rejection at 3 retries
+- [x] Citizen rejection moves task to `REJECTED`
+- [x] Worker retry increments retry count
+- [x] Max retry protection blocks retry at 3 attempts
 - [x] Release 3 Phase 1 integration tests added
 - [x] Release 3 Phase 2 integration tests added
+
+## Release 3 Phase 3 and 4 Checklist
+
+- [x] Assigned worker can retry a rejected task
+- [x] Retry moves `REJECTED` task back to `IN_PROGRESS`
+- [x] Retry count persists and blocks the fourth retry attempt
+- [x] Admin can list tasks with optional status filter
+- [x] Admin can view task detail with proof and verification
+- [x] Admin can approve citizen-verified tasks
+- [x] Admin approval completes both task and report
+- [x] Admin can reject citizen-verified tasks
+- [x] Admin can reassign incomplete tasks to another worker
+- [x] Release 3 Phase 3 and 4 integration tests added
 
 ## Current APIs
 
@@ -230,11 +261,17 @@ dto        -> request/response model, never expose entities directly
 | GET | `/admin/reports/{id}/bids` | ADMIN |
 | POST | `/admin/bids/{bidId}/approve` | ADMIN |
 | POST | `/admin/bids/{bidId}/reject` | ADMIN |
+| GET | `/admin/tasks?status=` | ADMIN |
+| GET | `/admin/tasks/{id}` | ADMIN |
+| POST | `/admin/tasks/{taskId}/approve` | ADMIN |
+| POST | `/admin/tasks/{taskId}/reject` | ADMIN |
+| POST | `/admin/tasks/{taskId}/reassign` | ADMIN |
 | GET | `/tasks/{id}` | Assigned WORKER |
 | PATCH | `/tasks/{id}/start` | Assigned WORKER |
 | POST | `/tasks/{taskId}/proof` | Assigned WORKER |
 | GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN |
 | POST | `/tasks/{taskId}/verify?status=VERIFIED|REJECTED` | Report CITIZEN |
+| POST | `/tasks/{taskId}/retry` | Assigned WORKER |
 
 ## Release 2 Bugs and Fixes
 
@@ -288,18 +325,44 @@ dto        -> request/response model, never expose entities directly
 6. Rejection with comments could incorrectly verify a task.
    - Fixed by branching explicitly on `VERIFIED` and `REJECTED`.
 
-7. Rejections had no retry limit.
-   - Fixed by blocking rejection when retry count reaches 3.
+7. Retry count was originally coupled to citizen rejection.
+   - Fixed by moving retry count increment to the worker retry action.
+
+8. Retry attempts needed an explicit cap.
+   - Fixed by blocking worker retry once retry count reaches 3.
+
+## Release 3 Phase 3 and 4 Bugs and Fixes
+
+1. Admin needed a neutral task detail endpoint instead of worker-owned task lookup.
+   - Fixed by composing task, proof and verification DTOs through `TaskDetail`.
+
+2. Admin task listing needed status filtering without exposing entities.
+   - Fixed by adding `TaskRepository.findAllByStatus` and mapping results to `TaskResponse`.
+
+3. Final task approval needed to protect state order.
+   - Fixed by allowing admin approval only after `VERIFIED_BY_CITIZEN` and while report is `IN_PROGRESS`.
+
+4. Task reassignment needed to avoid completed work.
+   - Fixed by blocking reassignment for completed tasks and completed reports.
+
+5. Worker task fetching reused an ambiguously named method.
+   - Fixed by renaming the worker-owned lookup to `getTaskOfWorkerByTask_Id`.
 
 ## Test Coverage
 
-Latest command:
+Latest full command attempted:
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-Latest result:
+Latest local result:
+
+```text
+Blocked: Testcontainers could not find a valid Docker environment.
+```
+
+Latest successful full result:
 
 ```text
 Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
@@ -312,6 +375,7 @@ Release test files:
 src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase1ProofIntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase3And4IntegrationTest.java
 ```
 
 ## Known Limitations
@@ -329,6 +393,6 @@ src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegra
 | --- | --- | --- |
 | Release 1 | Civic Reporting Foundation | Complete |
 | Release 2 | Worker Marketplace and Task Assignment | Complete |
-| Release 3 | Completion, Verification and Payment | Phase 1 and 2 Complete |
+| Release 3 | Completion, Verification and Payment | Phase 1 through 4 Complete; payment, wallet and ratings pending |
 | Release 4 | AI Intelligence and Event-Driven Architecture | Planned |
 | Release 5 | Production Hardening and Scalability | Planned |

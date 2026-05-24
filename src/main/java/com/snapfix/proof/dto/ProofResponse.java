@@ -28,7 +28,7 @@ public class ProofResponse {
 
     private Instant submittedAt;
 
-    public ProofResponse mapResponse(Proof proof){
+    public ProofResponse mapToResponse(Proof proof){
         ProofResponse response = new ProofResponse();
         response.setId(proof.getId());
         response.setImageUrl(proof.getImageUrl());

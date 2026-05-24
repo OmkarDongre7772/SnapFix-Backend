@@ -69,12 +69,11 @@ public class VerificationService {
             }
             verification.setComments(resolveComments(comments, "Rejected by citizen."));
             task.setStatus(TaskStatus.REJECTED);
-            task.setRetryCount(task.getRetryCount() + 1);
         }
 
         taskService.saveTask(task);
         Verification savedVerification = verificationRepository.save(verification);
-        return VerificationResponse.from(savedVerification);
+        return VerificationResponse.mapToResponse(savedVerification);
     }
 
     @Transactional
@@ -98,7 +97,12 @@ public class VerificationService {
 
         taskService.saveTask(task);
         Verification savedVerification = verificationRepository.save(verification);
-        return VerificationResponse.from(savedVerification);
+        return VerificationResponse.mapToResponse(savedVerification);
+    }
+
+    public Verification getVerificationByTaskId(UUID id) {
+        return verificationRepository.findByTask_Id(id)
+                .orElseThrow(() -> new IllegalStateException("Task not found for respective Verification id"));
     }
 
 /*
@@ -124,4 +128,5 @@ public class VerificationService {
         }
         return comments;
     }
+
 }

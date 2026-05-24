@@ -29,7 +29,7 @@ public class VerificationResponse {
         this.timestamp = timestamp;
     }
 
-    public static VerificationResponse from(Verification verification){
+    public static VerificationResponse mapToResponse(Verification verification){
         return new VerificationResponse(
                 verification.getId(),
                 verification.getTask().getId(),
@@ -38,4 +38,5 @@ public class VerificationResponse {
                 verification.getComments(),
                 verification.getTimestamp());
     }
+
 }

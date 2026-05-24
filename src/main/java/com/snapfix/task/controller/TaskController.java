@@ -45,7 +45,7 @@ public class TaskController {
     @PreAuthorize("hasRole('WORKER')")
     @GetMapping("/{id}")
     public ResponseEntity<TaskResponse> getTask(@PathVariable UUID id) {
-        return ResponseEntity.ok(TaskResponse.mapTask(taskService.getTask(id)));
+        return ResponseEntity.ok(TaskResponse.mapTask(taskService.getTaskOfWorkerByTask_Id(id)));
     }
 
     @PreAuthorize("hasRole('WORKER')")
@@ -75,5 +75,11 @@ public class TaskController {
     @PostMapping("/{taskId}/verify")
     public ResponseEntity<VerificationResponse> verifyTask(@PathVariable UUID taskId, @RequestParam VerificationStatus status, @RequestParam(required = false) String comments){
         return ResponseEntity.ok(verificationService.verifyTask(taskId, status, comments));
+    }
+
+    @PreAuthorize("hasRole('WORKER')")
+    @PostMapping("/{taskId}/retry")
+    public ResponseEntity<TaskResponse> retryTask(@PathVariable UUID taskId){
+        return ResponseEntity.ok(taskService.retryTask(taskId));
     }
 }

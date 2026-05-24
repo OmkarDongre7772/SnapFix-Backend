@@ -1,8 +1,12 @@
 package com.snapfix.admin.controller;
 
 import com.snapfix.admin.service.AdminService;
+import com.snapfix.admin.dto.ReassignTaskRequest;
 import com.snapfix.bid.service.BidService;
 import com.snapfix.report.service.ReportService;
+import com.snapfix.task.dto.TaskDetail;
+import com.snapfix.task.dto.TaskResponse;
+import com.snapfix.task.entity.TaskStatus;
 
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,6 +26,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+
 
 
 
@@ -64,4 +70,33 @@ public class AdminController {
         adminService.rejectBid(bidId);
         return ResponseEntity.ok().build();
     }
+
+    @GetMapping("/tasks")
+    public List<TaskResponse> getTasksByStatus(@RequestParam(required = false) TaskStatus status) {
+        return adminService.getTasksByStatus(status);
+    }
+    
+    @GetMapping("/tasks/{id}")
+    public ResponseEntity<TaskDetail> getTaskDetail(@PathVariable UUID id) {
+        return ResponseEntity.ok(adminService.getTaskDetail(id));
+    }
+    
+    @PostMapping("/tasks/{taskId}/approve")
+    public ResponseEntity<TaskResponse> approveTaskResponse(@PathVariable UUID taskId) {
+        return ResponseEntity.ok(adminService.approveTask(taskId));
+    }
+    
+    @PostMapping("/tasks/{taskId}/reject")
+    public ResponseEntity<TaskResponse> rejectTaskResponse(@PathVariable UUID taskId) {
+        return ResponseEntity.ok(adminService.rejectTask(taskId));
+    }
+
+    @PostMapping("/tasks/{taskId}/reassign")
+    public ResponseEntity<TaskResponse> reassignTask(@PathVariable UUID taskId, @RequestBody ReassignTaskRequest request) {
+        if (request.getNewWorkerId() == null) {
+            throw new IllegalArgumentException("newWorkerId is required");
+        }
+        return ResponseEntity.ok(adminService.reassignTask(taskId, request.getNewWorkerId()));
+    }
+    
 }

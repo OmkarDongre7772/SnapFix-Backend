@@ -5,9 +5,9 @@
 ![Java](https://img.shields.io/badge/Java-21-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0.6-brightgreen)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-PostGIS-blue)
-![Tests](https://img.shields.io/badge/Tests-44_Passing-success)
+![Tests](https://img.shields.io/badge/Tests-51_Total-blue)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
-![Release](https://img.shields.io/badge/Release-v3.0.0_Phase_2-purple)
+![Release](https://img.shields.io/badge/Release-v3.0.0_Phase_4-purple)
 
 ---
 
@@ -40,13 +40,15 @@ Release 2 adds the worker marketplace flow:
 - The system creates an assigned task automatically
 - Assigned workers move tasks from `ASSIGNED` to `IN_PROGRESS`
 
-Release 3 Phase 1 and Phase 2 add completion verification:
+Release 3 Phase 1 through Phase 4 add completion verification and final admin review:
 
 - Assigned workers upload proof of work with image, GPS point and remarks
 - Proof submission moves tasks from `IN_PROGRESS` to `PROOF_SUBMITTED`
 - Proof visibility is limited to assigned worker, report citizen and admin
 - Report citizens verify or reject submitted proof
-- Rejection increments retry count and enforces the max retry rule
+- Worker retry moves rejected tasks back to `IN_PROGRESS`
+- Retry attempts increment retry count and enforce the max retry rule
+- Admins list, inspect, approve, reject and reassign tasks
 
 This repository contains the Spring Boot backend for:
 
@@ -81,8 +83,12 @@ The long-term goal is to evolve SnapFix from a modular monolith into a productio
 | Phase 4 - Discovery and Notifications | Complete |
 | Release 2 - Worker Marketplace and Task Assignment | Complete |
 | Release 3 Phase 1 - Proof of Work Upload | Complete |
-| Release 3 Phase 2 - Citizen Verification and Retry | Complete |
-| Latest Test Result | `.\mvnw.cmd test` - 44 tests passing |
+| Release 3 Phase 2 - Citizen Verification | Complete |
+| Release 3 Phase 3 - Worker Retry | Complete |
+| Release 3 Phase 4 - Admin Final Review and Reassignment | Complete |
+| Current Test Suite | 51 tests |
+| Latest Full Test Attempt | Blocked locally because Testcontainers could not find Docker |
+| Latest Successful Full Test Result | `.\mvnw.cmd test` - 44 tests passing |
 
 ---
 
@@ -182,7 +188,8 @@ timeline
 - Task ownership enforcement for worker task access
 - Proof-of-work upload with Cloudinary image, PostGIS GPS point and remarks
 - Citizen verification and rejection for submitted proof
-- Retry count enforcement with max retry protection
+- Worker retry flow with max retry protection
+- Admin final task review and reassignment
 - Structured validation and exception responses
 - Dockerized local development
 - PostgreSQL/PostGIS integration tests using Testcontainers
@@ -227,7 +234,8 @@ timeline
 - Worker proof upload and `IN_PROGRESS -> PROOF_SUBMITTED` transition
 - Proof viewing for assigned worker, report citizen and admin
 - Citizen proof verification and rejection
-- Retry count increment on rejection with max retry protection
+- Retry count increment on worker retry with max retry protection
+- Admin task listing, detail, approval, rejection and reassignment
 - Structured validation and authorization error responses
 
 ---
@@ -297,7 +305,10 @@ flowchart TD
     G{Citizen Decision}
     H[Task Moves To VERIFIED_BY_CITIZEN]
     I[Task Moves To REJECTED]
-    J[Retry Count Increments]
+    J[Worker Retries Task]
+    K[Retry Count Increments]
+    L[Admin Final Review]
+    M[Task And Report Completed]
 
     A --> B
     B --> C
@@ -308,6 +319,10 @@ flowchart TD
     G -->|VERIFIED| H
     G -->|REJECTED| I
     I --> J
+    J --> K
+    K --> A
+    H --> L
+    L --> M
 ```
 
 ---
@@ -478,7 +493,7 @@ src/main/java/com/snapfix/
 | Nearby Search Query | < 200ms |
 | Geo Query Test Dataset | 1,000 reports |
 | Concurrent Users | 100 |
-| Test Coverage | 75%+ for Release 3 Phase 2 target |
+| Test Coverage | 75%+ for Release 3 Phase 4 target |
 
 ---
 
@@ -573,11 +588,10 @@ Docker Desktop must be running because integration tests use Testcontainers with
 Latest verified result:
 
 ```text
-Tests run: 44
+Tests run: 50
 Failures: 0
 Errors: 0
 Skipped: 0
-
 BUILD SUCCESS
 ```
 
@@ -680,6 +694,11 @@ lng         longitude
 | GET | `/admin/reports/{id}/bids` | ADMIN | View all bids for report |
 | POST | `/admin/bids/{bidId}/approve` | ADMIN | Approve bid, reject competitors, create task |
 | POST | `/admin/bids/{bidId}/reject` | ADMIN | Reject active bid |
+| GET | `/admin/tasks?status=` | ADMIN | List tasks, optionally filtered by status |
+| GET | `/admin/tasks/{id}` | ADMIN | View task, proof and verification detail |
+| POST | `/admin/tasks/{taskId}/approve` | ADMIN | Complete a citizen-verified task |
+| POST | `/admin/tasks/{taskId}/reject` | ADMIN | Reject a citizen-verified task |
+| POST | `/admin/tasks/{taskId}/reassign` | ADMIN | Reassign an incomplete task to another worker |
 
 ---
 
@@ -692,6 +711,7 @@ lng         longitude
 | POST | `/tasks/{taskId}/proof` | Assigned WORKER | Upload proof for an in-progress task |
 | GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN | View proof |
 | POST | `/tasks/{taskId}/verify?status=` | Report CITIZEN | Verify or reject submitted proof |
+| POST | `/tasks/{taskId}/retry` | Assigned WORKER | Retry a rejected task |
 
 `POST /tasks/{taskId}/proof` expects multipart form data:
 
@@ -707,6 +727,14 @@ remarks optional worker notes
 ```text
 status   VERIFIED | REJECTED
 comments optional citizen comments
+```
+
+`POST /admin/tasks/{taskId}/reassign` accepts:
+
+```json
+{
+  "newWorkerId": "uuid"
+}
 ```
 
 ---
@@ -763,7 +791,7 @@ USING GIST(location);
 
 ---
 
-# Release 3 Verification Flow
+# Release 3 Verification and Final Review Flow
 
 1. Worker starts assigned task with `PATCH /tasks/{id}/start`
 2. Worker uploads proof with `POST /tasks/{taskId}/proof`
@@ -774,8 +802,11 @@ USING GIST(location);
 7. Verified task moves to `VERIFIED_BY_CITIZEN`
 8. Citizen may reject with `status=REJECTED`
 9. Rejected task moves to `REJECTED`
-10. Rejection increments `retryCount`
-11. Rejection is blocked when `retryCount >= 3`
+10. Assigned worker retries with `POST /tasks/{taskId}/retry`
+11. Retry increments `retryCount` and moves task back to `IN_PROGRESS`
+12. Retry is blocked when `retryCount >= 3`
+13. Admin approves a citizen-verified task with `POST /admin/tasks/{taskId}/approve`
+14. Admin approval moves the task and report to `COMPLETED`
 
 ---
 
@@ -804,8 +835,21 @@ USING GIST(location);
 | Verification changed task status before checking source status | Validate `PROOF_SUBMITTED` before mutation |
 | Verification stored task id as citizen id | Store report owner citizen id |
 | Rejection with comments incorrectly verified task | Branch explicitly on `VERIFIED` vs `REJECTED` |
-| Rejections could continue indefinitely | Block rejection when retry count reaches 3 |
+| Retry count was coupled to citizen rejection | Increment retry count only when worker retries |
+| Retry attempts could continue indefinitely | Block worker retry when retry count reaches 3 |
 | Older integration cleanup ignored new child tables | Delete verification, proof, task and bid rows before reports |
+
+---
+
+# Release 3 Phase 3 and 4 Bugs and Fixes
+
+| Issue | Fix |
+|---|---|
+| Admin task detail needed proof and verification without worker ownership checks | Add `TaskDetail` response composed by `AdminService` |
+| Admin task listing needed status filtering | Add `findAllByStatus` and map tasks to DTOs |
+| Final approval could be called in the wrong lifecycle state | Allow approval only after citizen verification |
+| Completed reports/tasks should not be reassigned | Block reassignment for completed work |
+| Retry count semantics were unclear | Count actual worker retry attempts, not citizen rejections |
 
 ---
 
@@ -878,7 +922,7 @@ flowchart LR
 - Retry workflow
 - Payment and wallet
 - Worker ratings
-- Status: Phase 1 and Phase 2 complete; payment, wallet and ratings pending
+- Status: Phase 1 through Phase 4 complete; payment, wallet and ratings pending
 
 ---
 

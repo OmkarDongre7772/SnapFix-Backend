@@ -6,7 +6,10 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.snapfix.task.entity.Task;
+import com.snapfix.task.entity.TaskStatus;
 
 public interface TaskRepository extends JpaRepository<Task, UUID>{
     List<Task> findByWorker_Id(UUID workerId);
+
+    List<Task> findAllByStatus(TaskStatus status);
 }

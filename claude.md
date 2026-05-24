@@ -1,6 +1,6 @@
 # SnapFix - AI Assistant Context
 
-This file reflects the current backend state after Release 3 Phase 2 completion.
+This file reflects the current backend state after Release 3 Phase 4 completion.
 
 ## Current Development Stage
 
@@ -9,9 +9,11 @@ This file reflects the current backend state after Release 3 Phase 2 completion.
 | Product | SnapFix Backend |
 | Architecture | Modular monolith |
 | Current release | Release 3 - Completion and Verification |
-| Status | Release 1, Release 2, and Release 3 Phase 1-2 backend scope complete |
-| Latest verification | `.\mvnw.cmd test` |
-| Latest result | 44 tests, 0 failures, 0 errors |
+| Status | Release 1, Release 2, and Release 3 Phase 1-4 backend scope complete |
+| Latest full verification | `.\mvnw.cmd test` |
+| Latest local result |
+| Latest successful full result | 44 tests, 0 failures, 0 errors |
+| Current test suite size | 51 tests |
 
 ## Modules
 
@@ -104,6 +106,11 @@ payment / wallet / rating / event / ai / analytics
 | GET | `/admin/reports/{id}/bids` | ADMIN |
 | POST | `/admin/bids/{bidId}/approve` | ADMIN |
 | POST | `/admin/bids/{bidId}/reject` | ADMIN |
+| GET | `/admin/tasks?status=` | ADMIN |
+| GET | `/admin/tasks/{id}` | ADMIN |
+| POST | `/admin/tasks/{taskId}/approve` | ADMIN |
+| POST | `/admin/tasks/{taskId}/reject` | ADMIN |
+| POST | `/admin/tasks/{taskId}/reassign` | ADMIN |
 
 ### Tasks
 
@@ -114,6 +121,7 @@ payment / wallet / rating / event / ai / analytics
 | POST | `/tasks/{taskId}/proof` | Assigned WORKER |
 | GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN |
 | POST | `/tasks/{taskId}/verify?status=VERIFIED|REJECTED` | Report CITIZEN |
+| POST | `/tasks/{taskId}/retry` | Assigned WORKER |
 
 ### Notifications
 
@@ -159,9 +167,19 @@ payment / wallet / rating / event / ai / analytics
 - One verification per task through unique `task_id`.
 - Report citizen can verify or reject only after proof is submitted.
 - `VERIFIED` moves task to `VERIFIED_BY_CITIZEN`.
-- `REJECTED` moves task to `REJECTED` and increments retry count.
-- Rejection is blocked once retry count reaches 3.
+- `REJECTED` moves task to `REJECTED`.
+- Assigned worker retry moves task back to `IN_PROGRESS` and increments retry count.
+- Retry is blocked once retry count reaches 3.
 - Verification stores task id, citizen id, status, comments and timestamp.
+
+### Admin Final Review
+
+- Admin can list all tasks or filter by `TaskStatus`.
+- Admin task detail returns task, proof and verification DTOs.
+- Admin final approval requires `VERIFIED_BY_CITIZEN`.
+- Approval moves task to `COMPLETED` and report to `COMPLETED`.
+- Admin rejection moves citizen-verified tasks to `REJECTED`.
+- Admin reassignment assigns incomplete work to a new worker and resets status to `ASSIGNED`.
 
 ### AdminActionLog
 
@@ -200,18 +218,37 @@ CITIZEN -> POST /tasks/{taskId}/verify?status=VERIFIED|REJECTED
   -> validate report citizen owns task report
   -> validate task PROOF_SUBMITTED
   -> VERIFIED -> task VERIFIED_BY_CITIZEN
-  -> REJECTED -> task REJECTED and retryCount + 1
+  -> REJECTED -> task REJECTED
+
+WORKER -> POST /tasks/{taskId}/retry
+  -> validate assigned worker
+  -> validate task REJECTED
+  -> validate retryCount < 3
+  -> retryCount + 1
+  -> task REJECTED -> IN_PROGRESS
+
+ADMIN -> POST /admin/tasks/{taskId}/approve
+  -> validate task VERIFIED_BY_CITIZEN
+  -> task COMPLETED
+  -> report COMPLETED
+  -> AdminActionLog written
 ```
 
 ## Test Coverage
 
-Latest command:
+Latest full command attempted:
 
 ```powershell
 .\mvnw.cmd test
 ```
 
-Latest result:
+Latest local result:
+
+```text
+Blocked: Testcontainers could not find a valid Docker environment.
+```
+
+Latest successful full result:
 
 ```text
 Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
@@ -224,6 +261,7 @@ Release tests:
 src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase1ProofIntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase3And4IntegrationTest.java
 ```
 
 Coverage includes:
@@ -234,7 +272,8 @@ Coverage includes:
 - Admin approval, competing bid rejection, task creation, report status update and admin log.
 - Task ownership and `ASSIGNED -> IN_PROGRESS`.
 - Proof upload, proof ownership and `IN_PROGRESS -> PROOF_SUBMITTED`.
-- Citizen verification, rejection, retry count and max retry protection.
+- Citizen verification, rejection, worker retry count and max retry protection.
+- Admin task list/detail, final approval, rejection and reassignment.
 
 ## Release 2 Bugs and Fixes
 
@@ -261,7 +300,17 @@ Coverage includes:
 | Valid verification failed after status mutation | Checked source state after changing task status | Validate `PROOF_SUBMITTED` before mutation |
 | Verification saved task id as citizen id | Wrong UUID assigned | Store report owner citizen id |
 | Rejection with comments verified task | Branch used comments to decide status | Branch only on requested verification status |
-| Rejections had no upper bound | Retry rule was not enforced | Block rejection when `retryCount >= 3` |
+| Retry count was coupled to citizen rejection | Counted rejections instead of actual retry attempts | Increment only on worker retry |
+| Retry attempts had no explicit endpoint cap | Retry rule was not enforced at retry action | Block retry when `retryCount >= 3` |
+
+## Release 3 Phase 3 and 4 Bugs and Fixes
+
+| Bug | Cause | Fix |
+| --- | --- | --- |
+| Admin task detail needed non-worker lookup | Worker-owned task lookup denied admin orchestration | Use neutral task lookup and compose `TaskDetail` |
+| Admin task list needed filtering | Repository exposed only worker lookup | Add `findAllByStatus` |
+| Final approval needed lifecycle guards | Approval could be requested before citizen verification | Require `VERIFIED_BY_CITIZEN` and report `IN_PROGRESS` |
+| Reassignment needed terminal-state protection | Completed tasks/reports should not be reassigned | Block completed work before changing worker |
 
 ## Known Limitations
 
@@ -277,6 +326,5 @@ Coverage includes:
 
 Release 3 remaining work:
 
-- Admin final approval.
 - Payment and wallet transactions.
 - Worker rating updates.

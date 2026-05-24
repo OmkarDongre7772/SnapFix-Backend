@@ -51,7 +51,7 @@ private final StorageService storageService;
     @Transactional
     public ProofResponse uploadProof(ProofRequest request, UUID taskId, MultipartFile image) {
         validateProofRequest(request);
-        Task task = taskService.getTask(taskId);
+        Task task = taskService.getTaskOfWorkerByTask_Id(taskId);
         if(!task.getWorker().getId().equals(getCurrentUser())){
             throw new AccessDeniedException("Only the Assigned worker can upload the proof");
         }else if(!task.getStatus().equals(TaskStatus.IN_PROGRESS)){
@@ -80,14 +80,14 @@ private final StorageService storageService;
         task.setStatus(TaskStatus.PROOF_SUBMITTED);
         taskService.saveTask(task);
         proofRepository.save(proof);
-        return new ProofResponse().mapResponse(proof);
+        return new ProofResponse().mapToResponse(proof);
     }
     
     public ProofResponse getTaskProof(UUID taskId) {
         Proof proof = proofRepository.findByTask_Id(taskId)
                 .orElseThrow(() -> new IllegalArgumentException("Proof not found for task"));
         ensureCanViewProof(proof);
-        return new ProofResponse().mapResponse(proof);
+        return new ProofResponse().mapToResponse(proof);
     }
 
     public List<Task> getOldProofSubmitted(){
