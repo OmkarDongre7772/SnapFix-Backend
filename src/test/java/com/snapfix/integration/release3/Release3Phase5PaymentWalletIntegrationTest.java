@@ -6,6 +6,8 @@ import com.snapfix.admin.repository.AdminRepository;
 import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.common.BaseIntegrationTest;
 import com.snapfix.notification.repository.NotificationRepository;
+import com.snapfix.payment.entity.PaymentStatus;
+import com.snapfix.payment.repository.PaymentRepository;
 import com.snapfix.proof.repository.ProofRepository;
 import com.snapfix.report.repository.ReportRepository;
 import com.snapfix.report.repository.ReportSupportRepository;
@@ -13,8 +15,12 @@ import com.snapfix.storage.service.StorageService;
 import com.snapfix.task.entity.Task;
 import com.snapfix.task.entity.TaskStatus;
 import com.snapfix.task.repository.TaskRepository;
-import com.snapfix.verification.entity.Verification;
+import com.snapfix.user.entity.User;
+import com.snapfix.user.repository.UserRepository;
+import com.snapfix.user.repository.WorkerProfileRepository;
 import com.snapfix.verification.repository.VerificationRepository;
+import com.snapfix.wallet.repository.TransactionRepository;
+import com.snapfix.wallet.repository.WalletRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +30,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -36,7 +43,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
-public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTest {
+public class Release3Phase5PaymentWalletIntegrationTest extends BaseIntegrationTest {
+
+    private static final BigDecimal BID_AMOUNT = new BigDecimal("1500");
 
     @LocalServerPort
     private int port;
@@ -54,6 +63,9 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
     private NotificationRepository notificationRepository;
 
     @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
     private ProofRepository proofRepository;
 
     @Autowired
@@ -66,13 +78,27 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
     private TaskRepository taskRepository;
 
     @Autowired
+    private TransactionRepository transactionRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
     private VerificationRepository verificationRepository;
+
+    @Autowired
+    private WalletRepository walletRepository;
+
+    @Autowired
+    private WorkerProfileRepository workerProfileRepository;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
+        transactionRepository.deleteAll();
+        paymentRepository.deleteAll();
         verificationRepository.deleteAll();
         proofRepository.deleteAll();
         adminRepository.deleteAll();
@@ -81,141 +107,168 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         notificationRepository.deleteAll();
         reportSupportRepository.deleteAll();
         reportRepository.deleteAll();
-        stubStorageUpload("https://cdn.snapfix.test/release3-phase2.jpg");
+        stubStorageUpload("https://cdn.snapfix.test/release3-phase5.jpg");
     }
 
     @Test
-    @DisplayName("Report citizen verifies proof and task moves to verified by citizen")
-    void verifyTask_ownerCitizenMovesTaskToVerified() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
+    @DisplayName("Worker profile creation auto-creates an empty wallet")
+    void workerProfileCreation_autoCreatesWalletWithZeroBalance() throws Exception {
+        String workerEmail = uniqueEmail("r3p5-wallet-worker");
+        String workerToken = registerAndLogin(workerEmail, "WORKER");
 
-        HttpResponse<String> verify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED&comments=Looks%20good",
-                scenario.citizenToken());
-        JsonNode body = objectMapper.readTree(verify.body());
+        completeWorkerProfile(workerToken, 12.9716, 77.5946);
 
-        assertThat(verify.statusCode()).as(verify.body()).isEqualTo(200);
-        assertThat(body.get("taskId").asText()).isEqualTo(scenario.taskId());
-        assertThat(body.get("citizenId").asText()).isEqualTo(scenario.citizenId());
-        assertThat(body.get("status").asText()).isEqualTo("VERIFIED");
-        assertThat(body.get("comments").asText()).isEqualTo("Looks good");
-        assertThat(body.get("timestamp").asText()).isNotBlank();
+        User worker = userRepository.findByEmail(workerEmail).orElseThrow();
+        HttpResponse<String> walletResponse = get("/workers/wallet", workerToken);
+        JsonNode walletBody = objectMapper.readTree(walletResponse.body());
+
+        assertThat(walletResponse.statusCode()).as(walletResponse.body()).isEqualTo(200);
+        assertThat(new BigDecimal(walletBody.get("balance").asText())).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(walletRepository.findByWorker_Id(worker.getId())).isNotNull();
+        assertThat(workerProfileRepository.findById(worker.getId()).orElseThrow().getWallet()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Admin final approval creates a pending payment for the approved bid amount")
+    void approveTask_completedTaskCreatesPendingPayment() throws Exception {
+        Scenario scenario = createVerifiedScenario();
+
+        HttpResponse<String> approve = postNoBody("/admin/tasks/" + scenario.taskId() + "/approve", scenario.adminToken());
+
+        assertThat(approve.statusCode()).as(approve.body()).isEqualTo(200);
+        assertThat(paymentRepository.findAll()).singleElement().satisfies(payment -> {
+            assertThat(payment.getTask().getId().toString()).isEqualTo(scenario.taskId());
+            assertThat(payment.getWorker().getId().toString()).isEqualTo(scenario.workerId());
+            assertThat(payment.getAmount()).isEqualByComparingTo(BID_AMOUNT);
+            assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        });
+    }
+
+    @Test
+    @DisplayName("Admin releases completed task payment and worker sees updated wallet and history")
+    void releasePayment_completedTaskCreditsWalletCreatesCreditTransactionAndHistory() throws Exception {
+        Scenario scenario = createCompletedScenario();
+
+        HttpResponse<String> release = postNoBody("/admin/payments/" + scenario.taskId() + "/release", scenario.adminToken());
+        JsonNode releaseBody = objectMapper.readTree(release.body());
+        HttpResponse<String> wallet = get("/workers/wallet", scenario.workerToken());
+        HttpResponse<String> history = get("/workers/payments", scenario.workerToken());
+        JsonNode walletBody = objectMapper.readTree(wallet.body());
+        JsonNode historyBody = objectMapper.readTree(history.body());
+
+        assertThat(release.statusCode()).as(release.body()).isEqualTo(200);
+        assertThat(releaseBody.get("status").asText()).isEqualTo("RELEASED");
+        assertThat(new BigDecimal(releaseBody.get("amount").asText())).isEqualByComparingTo(BID_AMOUNT);
 
         Task savedTask = taskRepository.findById(UUID.fromString(scenario.taskId())).orElseThrow();
-        Verification savedVerification = verificationRepository.findByTask_Id(savedTask.getId()).orElseThrow();
-        assertThat(savedTask.getStatus()).isEqualTo(TaskStatus.VERIFIED_BY_CITIZEN);
-        assertThat(savedTask.getRetryCount()).isZero();
-        assertThat(savedVerification.getCitizenId().toString()).isEqualTo(scenario.citizenId());
+        assertThat(savedTask.getStatus()).isEqualTo(TaskStatus.PAYMENT_RELEASED);
+        assertThat(new BigDecimal(walletBody.get("balance").asText())).isEqualByComparingTo(BID_AMOUNT);
+
+        assertThat(paymentRepository.findAll()).singleElement().satisfies(payment -> {
+            assertThat(payment.getStatus()).isEqualTo(PaymentStatus.RELEASED);
+            assertThat(payment.getAmount()).isEqualByComparingTo(BID_AMOUNT);
+            assertThat(payment.getReleasedAt()).isNotNull();
+        });
+        assertThat(transactionRepository.findAll()).singleElement().satisfies(transaction -> {
+            assertThat(transaction.getAmount()).isEqualByComparingTo(BID_AMOUNT);
+            assertThat(transaction.getType()).isEqualTo("CREDIT");
+            assertThat(transaction.getReferenceId().getTask().getId().toString()).isEqualTo(scenario.taskId());
+            assertThat(transaction.getTimestamp()).isNotNull();
+        });
+        assertThat(history.statusCode()).as(history.body()).isEqualTo(200);
+        assertThat(historyBody).singleElement().satisfies(payment ->
+                assertThat(payment.get("status").asText()).isEqualTo("RELEASED"));
+        assertThat(notificationRepository.findByRecipient_Id(UUID.fromString(scenario.workerId())))
+                .anySatisfy(notification -> assertThat(notification.getMessage()).containsIgnoringCase("payment"));
     }
 
     @Test
-    @DisplayName("Report citizen rejects proof and task remains ready for retry")
-    void rejectTask_ownerCitizenMovesTaskToRejectedWithoutIncrementingRetry() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
+    @DisplayName("Only admin can release payment")
+    void releasePayment_requiresAdminRole() throws Exception {
+        Scenario scenario = createCompletedScenario();
 
-        HttpResponse<String> reject = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=REJECTED&comments=Photo%20is%20unclear",
-                scenario.citizenToken());
-        JsonNode body = objectMapper.readTree(reject.body());
+        HttpResponse<String> workerRelease = postNoBody("/admin/payments/" + scenario.taskId() + "/release", scenario.workerToken());
+        HttpResponse<String> citizenRelease = postNoBody("/admin/payments/" + scenario.taskId() + "/release", scenario.citizenToken());
 
-        assertThat(reject.statusCode()).as(reject.body()).isEqualTo(200);
-        assertThat(body.get("status").asText()).isEqualTo("REJECTED");
-        assertThat(body.get("comments").asText()).isEqualTo("Photo is unclear");
-
-        Task savedTask = taskRepository.findById(UUID.fromString(scenario.taskId())).orElseThrow();
-        assertThat(savedTask.getStatus()).isEqualTo(TaskStatus.REJECTED);
-        assertThat(savedTask.getRetryCount()).isZero();
+        assertThat(workerRelease.statusCode()).as(workerRelease.body()).isEqualTo(403);
+        assertThat(citizenRelease.statusCode()).as(citizenRelease.body()).isEqualTo(403);
+        assertThat(transactionRepository.findAll()).isEmpty();
     }
 
     @Test
-    @DisplayName("Only report citizen can verify proof")
-    void verifyTask_wrongCitizenAndWorkerAreRejected() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
-        String otherCitizenToken = registerAndLogin(uniqueEmail("r3p2-other-citizen"), "CITIZEN");
-
-        HttpResponse<String> workerVerify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                scenario.workerToken());
-        HttpResponse<String> otherCitizenVerify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                otherCitizenToken);
-
-        assertThat(workerVerify.statusCode()).as(workerVerify.body()).isEqualTo(403);
-        assertThat(otherCitizenVerify.statusCode()).as(otherCitizenVerify.body()).isEqualTo(403);
-        assertThat(verificationRepository.findByTask_Id(UUID.fromString(scenario.taskId()))).isEmpty();
-    }
-
-    @Test
-    @DisplayName("Task must be proof submitted before citizen verification")
-    void verifyTask_beforeProofSubmittedReturns409() throws Exception {
+    @DisplayName("Payment release requires a completed task")
+    void releasePayment_incompleteTaskReturns409AndDoesNotMutateMoney() throws Exception {
         Scenario scenario = createAssignedScenario();
 
-        HttpResponse<String> verify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                scenario.citizenToken());
+        HttpResponse<String> release = postNoBody("/admin/payments/" + scenario.taskId() + "/release", scenario.adminToken());
 
-        assertThat(verify.statusCode()).as(verify.body()).isEqualTo(409);
-        assertThat(verificationRepository.findByTask_Id(UUID.fromString(scenario.taskId()))).isEmpty();
+        assertThat(release.statusCode()).as(release.body()).isEqualTo(409);
+        assertThat(paymentRepository.findAll()).isEmpty();
+        assertThat(transactionRepository.findAll()).isEmpty();
+        assertThat(walletRepository.findByWorker_Id(UUID.fromString(scenario.workerId())).getBalance())
+                .isEqualByComparingTo(BigDecimal.ZERO);
     }
 
     @Test
-    @DisplayName("Task cannot be verified twice")
-    void verifyTask_duplicateVerificationReturns409() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
-        assertThat(postNoBody("/tasks/" + scenario.taskId() + "/verify?status=VERIFIED", scenario.citizenToken()).statusCode())
+    @DisplayName("Payment cannot be released twice")
+    void releasePayment_duplicateReleaseReturns409AndKeepsSingleTransaction() throws Exception {
+        Scenario scenario = createCompletedScenario();
+        assertThat(postNoBody("/admin/payments/" + scenario.taskId() + "/release", scenario.adminToken()).statusCode())
                 .isEqualTo(200);
 
-        HttpResponse<String> duplicate = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                scenario.citizenToken());
+        HttpResponse<String> duplicate = postNoBody("/admin/payments/" + scenario.taskId() + "/release", scenario.adminToken());
 
         assertThat(duplicate.statusCode()).as(duplicate.body()).isEqualTo(409);
-        assertThat(verificationRepository.findAll()).hasSize(1);
+        assertThat(paymentRepository.findAll()).hasSize(1);
+        assertThat(transactionRepository.findAll()).hasSize(1);
+        assertThat(walletRepository.findByWorker_Id(UUID.fromString(scenario.workerId())).getBalance())
+                .isEqualByComparingTo(BID_AMOUNT);
     }
 
-    @Test
-    @DisplayName("Rejected task cannot exceed maximum retry count")
-    void verifyTask_rejectAtMaxRetryReturns409() throws Exception {
+    private Scenario createCompletedScenario() throws Exception {
+        Scenario scenario = createVerifiedScenario();
+        HttpResponse<String> approve = postNoBody("/admin/tasks/" + scenario.taskId() + "/approve", scenario.adminToken());
+        assertThat(approve.statusCode()).as(approve.body()).isEqualTo(200);
+        return scenario;
+    }
+
+    private Scenario createVerifiedScenario() throws Exception {
         Scenario scenario = createProofSubmittedScenario();
-        Task task = taskRepository.findById(UUID.fromString(scenario.taskId())).orElseThrow();
-        task.setRetryCount(3);
-        taskRepository.save(task);
-
-        HttpResponse<String> reject = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=REJECTED&comments=Still%20bad",
+        HttpResponse<String> verify = postNoBody(
+                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED&comments=Accepted",
                 scenario.citizenToken());
-
-        assertThat(reject.statusCode()).as(reject.body()).isEqualTo(409);
-        assertThat(verificationRepository.findByTask_Id(task.getId())).isEmpty();
-        assertThat(taskRepository.findById(task.getId()).orElseThrow().getRetryCount()).isEqualTo(3);
+        assertThat(verify.statusCode()).as(verify.body()).isEqualTo(200);
+        return scenario;
     }
 
     private Scenario createProofSubmittedScenario() throws Exception {
         Scenario scenario = createAssignedScenario();
         assertThat(patch("/tasks/" + scenario.taskId() + "/start", scenario.workerToken()).statusCode()).isEqualTo(200);
-        stubStorageUpload("https://cdn.snapfix.test/release3-phase2-proof.jpg");
+        stubStorageUpload("https://cdn.snapfix.test/release3-phase5-proof.jpg");
         HttpResponse<String> proof = uploadProof(scenario.taskId(), scenario.workerToken());
         assertThat(proof.statusCode()).as(proof.body()).isEqualTo(200);
         return scenario;
     }
 
     private Scenario createAssignedScenario() throws Exception {
-        String citizenToken = registerAndLogin(uniqueEmail("r3p2-owner"), "CITIZEN");
-        String workerToken = registerAndLogin(uniqueEmail("r3p2-worker"), "WORKER");
-        String adminToken = registerAndLogin(uniqueEmail("r3p2-admin"), "ADMIN");
+        String citizenToken = registerAndLogin(uniqueEmail("r3p5-owner"), "CITIZEN");
+        String workerEmail = uniqueEmail("r3p5-worker");
+        String workerToken = registerAndLogin(workerEmail, "WORKER");
+        String adminToken = registerAndLogin(uniqueEmail("r3p5-admin"), "ADMIN");
+        String workerId = userRepository.findByEmail(workerEmail).orElseThrow().getId().toString();
 
         completeWorkerProfile(workerToken, 12.9716, 77.5946);
         JsonNode report = objectMapper.readTree(createReport(
                 citizenToken,
-                "Release 3 verification task",
+                "Release 3 phase 5 payment task",
                 "ROAD_DAMAGE",
                 12.9716,
                 77.5946).body());
         JsonNode bid = objectMapper.readTree(placeBid(workerToken, report.get("id").asText()).body());
         approveBid(adminToken, bid.get("id").asText());
 
-        String taskId = taskRepository.findAll().get(0).getId().toString();
-        return new Scenario(taskId, report.get("citizenId").asText(), citizenToken, workerToken);
+        Task task = taskRepository.findAll().get(0);
+        return new Scenario(task.getId().toString(), workerId, citizenToken, workerToken, adminToken);
     }
 
     private void approveBid(String adminToken, String bidId) throws Exception {
@@ -229,11 +282,11 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
                 """
                         {
                           "reportId": "%s",
-                          "bidAmount": 1500,
+                          "bidAmount": %s,
                           "durationEstimate": 4,
-                          "resourceNote": "verification tools"
+                          "resourceNote": "payment phase tools"
                         }
-                        """.formatted(reportId),
+                        """.formatted(reportId, BID_AMOUNT),
                 workerToken);
     }
 
@@ -261,7 +314,7 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
                           "email": "%s",
                           "password": "%s",
                           "role": "%s",
-                          "name": "Release 3 Phase 2 User"
+                          "name": "Release 3 Phase 5 User"
                         }
                         """.formatted(email, password, role),
                 null);
@@ -311,7 +364,7 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         writeTextPart(body, boundary, "lat", "12.9717");
         writeTextPart(body, boundary, "lng", "77.5947");
-        writeTextPart(body, boundary, "remarks", "Ready for citizen verification");
+        writeTextPart(body, boundary, "remarks", "Ready for payment phase");
         writeFilePart(body, boundary, "image", "proof.jpg");
         finishMultipart(body, boundary);
 
@@ -342,13 +395,13 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         body.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
     }
 
-    // private HttpResponse<String> get(String path, String accessToken) throws Exception {
-    //     HttpRequest request = HttpRequest.newBuilder(uri(path))
-    //             .header("Authorization", "Bearer " + accessToken)
-    //             .GET()
-    //             .build();
-    //     return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    // }
+    private HttpResponse<String> get(String path, String accessToken) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(uri(path))
+                .header("Authorization", "Bearer " + accessToken)
+                .GET()
+                .build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
 
     private HttpResponse<String> patch(String path, String accessToken) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(uri(path))
@@ -359,11 +412,14 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
     }
 
     private HttpResponse<String> postNoBody(String path, String accessToken) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(uri(path))
-                .header("Authorization", "Bearer " + accessToken)
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri(path))
+                .POST(HttpRequest.BodyPublishers.noBody());
+
+        if (accessToken != null) {
+            builder.header("Authorization", "Bearer " + accessToken);
+        }
+
+        return httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> postJson(String path, String body, String accessToken) throws Exception {
@@ -392,6 +448,11 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         when(storageService.uploadImage(any(MultipartFile.class))).thenReturn(imageUrl);
     }
 
-    private record Scenario(String taskId, String citizenId, String citizenToken, String workerToken) {
+    private record Scenario(
+            String taskId,
+            String workerId,
+            String citizenToken,
+            String workerToken,
+            String adminToken) {
     }
 }

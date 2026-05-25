@@ -3,6 +3,8 @@ package com.snapfix.admin.controller;
 import com.snapfix.admin.service.AdminService;
 import com.snapfix.admin.dto.ReassignTaskRequest;
 import com.snapfix.bid.service.BidService;
+import com.snapfix.payment.dto.PaymentResponse;
+import com.snapfix.payment.service.PaymentService;
 import com.snapfix.report.service.ReportService;
 import com.snapfix.task.dto.TaskDetail;
 import com.snapfix.task.dto.TaskResponse;
@@ -36,14 +38,16 @@ import org.springframework.web.bind.annotation.RequestBody;
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminController {
     
+    private final PaymentService paymentService;
     private final AdminService adminService;
     private final BidService bidService;
     private final ReportService reportService;
 
-    AdminController(ReportService reportService, BidService bidService, AdminService adminService) {
+    AdminController(ReportService reportService, BidService bidService, AdminService adminService, PaymentService paymentService) {
         this.reportService = reportService;
         this.bidService = bidService;
         this.adminService = adminService;
+        this.paymentService = paymentService;
     }
 
     @GetMapping("/reports")
@@ -98,5 +102,11 @@ public class AdminController {
         }
         return ResponseEntity.ok(adminService.reassignTask(taskId, request.getNewWorkerId()));
     }
+
+    @PostMapping("payments/{taskId}/release")
+    public ResponseEntity<PaymentResponse> releasePayment(@PathVariable UUID taskId) {
+        return ResponseEntity.ok(paymentService.releasePayment(taskId));
+    }
+    
     
 }

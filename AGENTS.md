@@ -1,7 +1,7 @@
 # SnapFix - AI Assistant Context
 
 Use this file as the current project truth for coding agents. Older reference PDFs and generated
-status notes may be stale; the code and this file reflect the Release 3 Phase 4 completion state.
+status notes may be stale; the code and this file reflect the Release 3 completion state.
 
 ## Project Overview
 
@@ -16,17 +16,19 @@ This repository contains the SnapFix Spring Boot backend.
 
 | Field | Value |
 | --- | --- |
-| Current release | Release 3 - Completion and Verification |
+| Current release | Release 3 - Completion, Verification, Payment and Ratings |
 | Release 1 | Complete |
 | Release 2 | Complete |
 | Release 3 Phase 1 | Complete |
 | Release 3 Phase 2 | Complete |
 | Release 3 Phase 3 | Complete |
 | Release 3 Phase 4 | Complete |
+| Release 3 Phase 5 | Complete |
+| Release 3 Phase 6 | Complete |
 | Latest full verification | `.\mvnw.cmd test` |
-| Latest full result |
-| Latest successful full result | 44 tests, 0 failures, 0 errors |
-| Current test suite size | 51 tests |
+| Latest full result | 63 tests, 0 failures, 0 errors |
+| Latest successful full result | 63 tests, 0 failures, 0 errors |
+| Current test suite size | 63 tests |
 
 ## Tech Stack
 
@@ -54,6 +56,9 @@ admin
 task
 proof
 verification
+payment
+wallet
+rating
 storage
 geo
 common
@@ -63,9 +68,6 @@ config
 Future modules:
 
 ```text
-payment
-wallet
-rating
 event
 ai
 analytics
@@ -186,6 +188,25 @@ dto        -> request/response model, never expose entities directly
 - `POST /admin/tasks/{taskId}/reassign` assigns an incomplete task to a new worker.
 - Admin task decisions write `AdminActionLog`.
 
+### Payment and Wallet
+
+- Worker profile creation auto-creates a wallet with zero balance.
+- `GET /workers/wallet` returns the current worker's wallet.
+- `GET /workers/payments` returns the current worker's payment history.
+- Admin final approval creates a pending payment for the approved bid amount.
+- `POST /admin/payments/{taskId}/release` releases payment for a completed task.
+- Payment release credits the worker wallet, creates a wallet transaction, writes a notification and moves the task to `PAYMENT_RELEASED`.
+- Duplicate payment release is blocked after the payment is no longer `PENDING`.
+
+### Worker Ratings
+
+- `POST /workers/{workerId}/rating` lets the report citizen rate completed work.
+- Ratings require a completed task for the requested worker.
+- Workers and admins cannot submit ratings.
+- One rating per task is enforced.
+- Worker average rating is recalculated after rating submission.
+- `GET /workers/{workerId}/rating` returns worker rating summary.
+
 ## Release 2 Final Checklist
 
 - [x] Worker profile and PostGIS location tracking working
@@ -223,6 +244,21 @@ dto        -> request/response model, never expose entities directly
 - [x] Admin can reject citizen-verified tasks
 - [x] Admin can reassign incomplete tasks to another worker
 - [x] Release 3 Phase 3 and 4 integration tests added
+
+## Release 3 Phase 5 and 6 Checklist
+
+- [x] Worker profile creation auto-creates a wallet
+- [x] Worker can view wallet balance
+- [x] Admin final approval creates pending payment
+- [x] Admin can release completed-task payment
+- [x] Payment release credits wallet and creates transaction history
+- [x] Duplicate payment release is blocked
+- [x] Citizen can rate completed worker task
+- [x] Worker/admin rating submissions are blocked
+- [x] Duplicate task rating is blocked
+- [x] Worker rating summary updates after rating
+- [x] Release 3 Phase 5 integration tests added
+- [x] Release 3 Phase 6 integration tests added
 
 ## Current APIs
 
@@ -266,12 +302,17 @@ dto        -> request/response model, never expose entities directly
 | POST | `/admin/tasks/{taskId}/approve` | ADMIN |
 | POST | `/admin/tasks/{taskId}/reject` | ADMIN |
 | POST | `/admin/tasks/{taskId}/reassign` | ADMIN |
+| POST | `/admin/payments/{taskId}/release` | ADMIN |
 | GET | `/tasks/{id}` | Assigned WORKER |
 | PATCH | `/tasks/{id}/start` | Assigned WORKER |
 | POST | `/tasks/{taskId}/proof` | Assigned WORKER |
 | GET | `/tasks/{taskId}/proof` | Assigned WORKER, report CITIZEN or ADMIN |
 | POST | `/tasks/{taskId}/verify?status=VERIFIED|REJECTED` | Report CITIZEN |
 | POST | `/tasks/{taskId}/retry` | Assigned WORKER |
+| GET | `/workers/wallet` | WORKER |
+| GET | `/workers/payments` | WORKER |
+| POST | `/workers/{workerId}/rating` | Report CITIZEN |
+| GET | `/workers/{workerId}/rating` | Authenticated |
 
 ## Release 2 Bugs and Fixes
 
@@ -359,13 +400,14 @@ Latest full command attempted:
 Latest local result:
 
 ```text
-Blocked: Testcontainers could not find a valid Docker environment.
+Tests run: 63, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
 ```
 
 Latest successful full result:
 
 ```text
-Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 63, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -376,6 +418,8 @@ src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase1ProofIntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase3And4IntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase5PaymentWalletIntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase6RatingIntegrationTest.java
 ```
 
 ## Known Limitations
@@ -384,7 +428,6 @@ src/test/java/com/snapfix/integration/release3/Release3Phase3And4IntegrationTest
 - In-memory access-token blacklist should move to Redis later.
 - Add explicit GiST index for `reports.location` before production data volumes.
 - Real-time notification delivery is deferred.
-- Release 3 payment, wallet and rating flows are not implemented.
 - Auto-verification scheduling exists as a foundation but needs final production policy review.
 
 ## Roadmap
@@ -393,6 +436,6 @@ src/test/java/com/snapfix/integration/release3/Release3Phase3And4IntegrationTest
 | --- | --- | --- |
 | Release 1 | Civic Reporting Foundation | Complete |
 | Release 2 | Worker Marketplace and Task Assignment | Complete |
-| Release 3 | Completion, Verification and Payment | Phase 1 through 4 Complete; payment, wallet and ratings pending |
+| Release 3 | Completion, Verification, Payment and Ratings | Complete |
 | Release 4 | AI Intelligence and Event-Driven Architecture | Planned |
 | Release 5 | Production Hardening and Scalability | Planned |

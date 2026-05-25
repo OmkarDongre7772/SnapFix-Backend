@@ -1,17 +1,18 @@
 package com.snapfix.user.entity;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.locationtech.jts.geom.Point;
+import com.snapfix.wallet.entity.Wallet;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.MapsId;
@@ -47,8 +48,9 @@ public class WorkerProfile {
     @Column(nullable = false)
     private int completedTasks = 0;
 
-    @Column(nullable = false)
-    private BigDecimal walletBalance = BigDecimal.ZERO;
+    @OneToOne(cascade = CascadeType.PERSIST)
+    @JoinColumn(name = "wallet_id", nullable = false)
+    private Wallet wallet;
 
     @Column(columnDefinition = "geometry(Point, 4326)")
     @JdbcTypeCode(SqlTypes.GEOMETRY)

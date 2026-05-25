@@ -7,10 +7,12 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
 
 import com.snapfix.report.entity.Report;
 import com.snapfix.report.entity.ReportStatus;
 
+@Repository
 public interface ReportRepository extends JpaRepository<Report, UUID>{
 
     @Query(value = """

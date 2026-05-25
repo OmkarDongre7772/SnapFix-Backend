@@ -2,6 +2,7 @@ package com.snapfix.notification.entity;
 
 public enum NotificationType {
     REPORT_CREATED,
-    BID_APPROVED ,
-    REPORT_SUPPORTED
+    BID_APPROVED,
+    REPORT_SUPPORTED,
+    PAYMENT_RELEASED
 }

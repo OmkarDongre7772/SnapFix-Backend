@@ -164,6 +164,10 @@ public class BidService {
         return bidRepository.save(bid);
     }
 
+    @Transactional
+    public Bid getApprovedBidForReport(UUID reportId){
+        return bidRepository.findByReport_Id(reportId).stream().filter(b -> b.getStatus() == BidStatus.APPROVED).toList().getFirst();
+    }
     /*
      * UTILITY FUNCTIONS
      */

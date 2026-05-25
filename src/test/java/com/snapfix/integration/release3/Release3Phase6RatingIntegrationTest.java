@@ -6,15 +6,18 @@ import com.snapfix.admin.repository.AdminRepository;
 import com.snapfix.bid.repository.BidRepository;
 import com.snapfix.common.BaseIntegrationTest;
 import com.snapfix.notification.repository.NotificationRepository;
+import com.snapfix.payment.repository.PaymentRepository;
 import com.snapfix.proof.repository.ProofRepository;
+import com.snapfix.rating.repository.RatingRepository;
 import com.snapfix.report.repository.ReportRepository;
 import com.snapfix.report.repository.ReportSupportRepository;
 import com.snapfix.storage.service.StorageService;
 import com.snapfix.task.entity.Task;
-import com.snapfix.task.entity.TaskStatus;
 import com.snapfix.task.repository.TaskRepository;
-import com.snapfix.verification.entity.Verification;
+import com.snapfix.user.repository.UserRepository;
+import com.snapfix.user.repository.WorkerProfileRepository;
 import com.snapfix.verification.repository.VerificationRepository;
+import com.snapfix.wallet.repository.TransactionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
-public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTest {
+public class Release3Phase6RatingIntegrationTest extends BaseIntegrationTest {
 
     @LocalServerPort
     private int port;
@@ -54,7 +57,13 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
     private NotificationRepository notificationRepository;
 
     @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
     private ProofRepository proofRepository;
+
+    @Autowired
+    private RatingRepository ratingRepository;
 
     @Autowired
     private ReportRepository reportRepository;
@@ -66,13 +75,25 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
     private TaskRepository taskRepository;
 
     @Autowired
+    private TransactionRepository transactionRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
     private VerificationRepository verificationRepository;
+
+    @Autowired
+    private WorkerProfileRepository workerProfileRepository;
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
+        ratingRepository.deleteAll();
+        transactionRepository.deleteAll();
+        paymentRepository.deleteAll();
         verificationRepository.deleteAll();
         proofRepository.deleteAll();
         adminRepository.deleteAll();
@@ -81,141 +102,168 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         notificationRepository.deleteAll();
         reportSupportRepository.deleteAll();
         reportRepository.deleteAll();
-        stubStorageUpload("https://cdn.snapfix.test/release3-phase2.jpg");
+        stubStorageUpload("https://cdn.snapfix.test/release3-phase6.jpg");
     }
 
     @Test
-    @DisplayName("Report citizen verifies proof and task moves to verified by citizen")
-    void verifyTask_ownerCitizenMovesTaskToVerified() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
+    @DisplayName("Citizen rates completed task and worker rating summary updates")
+    void rateWorker_completedTaskUpdatesAverageAndSummary() throws Exception {
+        Scenario scenario = createCompletedScenario();
 
-        HttpResponse<String> verify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED&comments=Looks%20good",
-                scenario.citizenToken());
-        JsonNode body = objectMapper.readTree(verify.body());
+        HttpResponse<String> rate = rateWorker(scenario.workerId(), scenario.taskId(), 4, "Solid repair", scenario.citizenToken());
+        JsonNode body = objectMapper.readTree(rate.body());
+        HttpResponse<String> summary = get("/workers/" + scenario.workerId() + "/rating", scenario.citizenToken());
+        JsonNode summaryBody = objectMapper.readTree(summary.body());
 
-        assertThat(verify.statusCode()).as(verify.body()).isEqualTo(200);
-        assertThat(body.get("taskId").asText()).isEqualTo(scenario.taskId());
+        assertThat(rate.statusCode()).as(rate.body()).isEqualTo(200);
+        assertThat(body.get("task").get("id").asText()).isEqualTo(scenario.taskId());
+        assertThat(body.get("workerId").asText()).isEqualTo(scenario.workerId());
         assertThat(body.get("citizenId").asText()).isEqualTo(scenario.citizenId());
-        assertThat(body.get("status").asText()).isEqualTo("VERIFIED");
-        assertThat(body.get("comments").asText()).isEqualTo("Looks good");
+        assertThat(body.get("score").asInt()).isEqualTo(4);
+        assertThat(body.get("comment").asText()).isEqualTo("Solid repair");
         assertThat(body.get("timestamp").asText()).isNotBlank();
 
-        Task savedTask = taskRepository.findById(UUID.fromString(scenario.taskId())).orElseThrow();
-        Verification savedVerification = verificationRepository.findByTask_Id(savedTask.getId()).orElseThrow();
-        assertThat(savedTask.getStatus()).isEqualTo(TaskStatus.VERIFIED_BY_CITIZEN);
-        assertThat(savedTask.getRetryCount()).isZero();
-        assertThat(savedVerification.getCitizenId().toString()).isEqualTo(scenario.citizenId());
+        assertThat(summary.statusCode()).as(summary.body()).isEqualTo(200);
+        assertThat(summaryBody.get("average_score").asDouble()).isEqualTo(4.0);
+        assertThat(summaryBody.get("task_count").asInt()).isEqualTo(1);
+        assertThat(workerProfileRepository.findByUser_Id(UUID.fromString(scenario.workerId())).orElseThrow().getRating())
+                .isEqualTo(4.0);
+        assertThat(workerProfileRepository.findByUser_Id(UUID.fromString(scenario.workerId())).orElseThrow().getCompletedTasks())
+                .isEqualTo(1);
     }
 
     @Test
-    @DisplayName("Report citizen rejects proof and task remains ready for retry")
-    void rejectTask_ownerCitizenMovesTaskToRejectedWithoutIncrementingRetry() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
+    @DisplayName("Only original report citizen can rate the worker")
+    void rateWorker_wrongCitizenReturns403() throws Exception {
+        Scenario scenario = createCompletedScenario();
+        String otherCitizenToken = registerAndLogin(uniqueEmail("r3p6-other-citizen"), "CITIZEN");
 
-        HttpResponse<String> reject = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=REJECTED&comments=Photo%20is%20unclear",
-                scenario.citizenToken());
-        JsonNode body = objectMapper.readTree(reject.body());
+        HttpResponse<String> rate = rateWorker(scenario.workerId(), scenario.taskId(), 5, "Trying", otherCitizenToken);
 
-        assertThat(reject.statusCode()).as(reject.body()).isEqualTo(200);
-        assertThat(body.get("status").asText()).isEqualTo("REJECTED");
-        assertThat(body.get("comments").asText()).isEqualTo("Photo is unclear");
-
-        Task savedTask = taskRepository.findById(UUID.fromString(scenario.taskId())).orElseThrow();
-        assertThat(savedTask.getStatus()).isEqualTo(TaskStatus.REJECTED);
-        assertThat(savedTask.getRetryCount()).isZero();
+        assertThat(rate.statusCode()).as(rate.body()).isEqualTo(403);
+        assertThat(ratingRepository.findAll()).isEmpty();
     }
 
     @Test
-    @DisplayName("Only report citizen can verify proof")
-    void verifyTask_wrongCitizenAndWorkerAreRejected() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
-        String otherCitizenToken = registerAndLogin(uniqueEmail("r3p2-other-citizen"), "CITIZEN");
+    @DisplayName("Worker and admin cannot submit rating")
+    void rateWorker_workerAndAdminRolesReturn403() throws Exception {
+        Scenario scenario = createCompletedScenario();
 
-        HttpResponse<String> workerVerify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                scenario.workerToken());
-        HttpResponse<String> otherCitizenVerify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                otherCitizenToken);
+        HttpResponse<String> workerRate = rateWorker(scenario.workerId(), scenario.taskId(), 5, "Nope", scenario.workerToken());
+        HttpResponse<String> adminRate = rateWorker(scenario.workerId(), scenario.taskId(), 5, "Nope", scenario.adminToken());
 
-        assertThat(workerVerify.statusCode()).as(workerVerify.body()).isEqualTo(403);
-        assertThat(otherCitizenVerify.statusCode()).as(otherCitizenVerify.body()).isEqualTo(403);
-        assertThat(verificationRepository.findByTask_Id(UUID.fromString(scenario.taskId()))).isEmpty();
+        assertThat(workerRate.statusCode()).as(workerRate.body()).isEqualTo(403);
+        assertThat(adminRate.statusCode()).as(adminRate.body()).isEqualTo(403);
+        assertThat(ratingRepository.findAll()).isEmpty();
     }
 
     @Test
-    @DisplayName("Task must be proof submitted before citizen verification")
-    void verifyTask_beforeProofSubmittedReturns409() throws Exception {
+    @DisplayName("Task must be completed before rating")
+    void rateWorker_assignedTaskReturns409() throws Exception {
         Scenario scenario = createAssignedScenario();
 
-        HttpResponse<String> verify = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                scenario.citizenToken());
+        HttpResponse<String> rate = rateWorker(scenario.workerId(), scenario.taskId(), 5, "Too soon", scenario.citizenToken());
 
-        assertThat(verify.statusCode()).as(verify.body()).isEqualTo(409);
-        assertThat(verificationRepository.findByTask_Id(UUID.fromString(scenario.taskId()))).isEmpty();
+        assertThat(rate.statusCode()).as(rate.body()).isEqualTo(409);
+        assertThat(ratingRepository.findAll()).isEmpty();
     }
 
     @Test
-    @DisplayName("Task cannot be verified twice")
-    void verifyTask_duplicateVerificationReturns409() throws Exception {
-        Scenario scenario = createProofSubmittedScenario();
-        assertThat(postNoBody("/tasks/" + scenario.taskId() + "/verify?status=VERIFIED", scenario.citizenToken()).statusCode())
+    @DisplayName("Task can only be rated once")
+    void rateWorker_duplicateRatingReturns409() throws Exception {
+        Scenario scenario = createCompletedScenario();
+        assertThat(rateWorker(scenario.workerId(), scenario.taskId(), 5, "First", scenario.citizenToken()).statusCode())
                 .isEqualTo(200);
 
-        HttpResponse<String> duplicate = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED",
-                scenario.citizenToken());
+        HttpResponse<String> duplicate = rateWorker(scenario.workerId(), scenario.taskId(), 3, "Second", scenario.citizenToken());
 
         assertThat(duplicate.statusCode()).as(duplicate.body()).isEqualTo(409);
-        assertThat(verificationRepository.findAll()).hasSize(1);
+        assertThat(ratingRepository.findAll()).hasSize(1);
+        assertThat(workerProfileRepository.findByUser_Id(UUID.fromString(scenario.workerId())).orElseThrow().getCompletedTasks())
+                .isEqualTo(1);
     }
 
     @Test
-    @DisplayName("Rejected task cannot exceed maximum retry count")
-    void verifyTask_rejectAtMaxRetryReturns409() throws Exception {
+    @DisplayName("Invalid score returns bad request")
+    void rateWorker_invalidScoreReturns400() throws Exception {
+        Scenario scenario = createCompletedScenario();
+
+        HttpResponse<String> rate = rateWorker(scenario.workerId(), scenario.taskId(), 6, "Too much", scenario.citizenToken());
+
+        assertThat(rate.statusCode()).as(rate.body()).isEqualTo(400);
+        assertThat(ratingRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Path worker must match task worker")
+    void rateWorker_wrongWorkerPathReturns400() throws Exception {
+        Scenario scenario = createCompletedScenario();
+        String otherWorkerEmail = uniqueEmail("r3p6-other-worker");
+        String otherWorkerToken = registerAndLogin(otherWorkerEmail, "WORKER");
+        completeWorkerProfile(otherWorkerToken, 12.9750, 77.5950);
+        String otherWorkerId = userRepository.findByEmail(otherWorkerEmail).orElseThrow().getId().toString();
+
+        HttpResponse<String> rate = rateWorker(otherWorkerId, scenario.taskId(), 5, "Wrong path", scenario.citizenToken());
+
+        assertThat(rate.statusCode()).as(rate.body()).isEqualTo(400);
+        assertThat(ratingRepository.findAll()).isEmpty();
+    }
+
+    private Scenario createCompletedScenario() throws Exception {
         Scenario scenario = createProofSubmittedScenario();
-        Task task = taskRepository.findById(UUID.fromString(scenario.taskId())).orElseThrow();
-        task.setRetryCount(3);
-        taskRepository.save(task);
-
-        HttpResponse<String> reject = postNoBody(
-                "/tasks/" + scenario.taskId() + "/verify?status=REJECTED&comments=Still%20bad",
+        HttpResponse<String> verify = postNoBody(
+                "/tasks/" + scenario.taskId() + "/verify?status=VERIFIED&comments=Accepted",
                 scenario.citizenToken());
+        assertThat(verify.statusCode()).as(verify.body()).isEqualTo(200);
 
-        assertThat(reject.statusCode()).as(reject.body()).isEqualTo(409);
-        assertThat(verificationRepository.findByTask_Id(task.getId())).isEmpty();
-        assertThat(taskRepository.findById(task.getId()).orElseThrow().getRetryCount()).isEqualTo(3);
+        HttpResponse<String> approve = postNoBody("/admin/tasks/" + scenario.taskId() + "/approve", scenario.adminToken());
+        assertThat(approve.statusCode()).as(approve.body()).isEqualTo(200);
+        return scenario;
     }
 
     private Scenario createProofSubmittedScenario() throws Exception {
         Scenario scenario = createAssignedScenario();
         assertThat(patch("/tasks/" + scenario.taskId() + "/start", scenario.workerToken()).statusCode()).isEqualTo(200);
-        stubStorageUpload("https://cdn.snapfix.test/release3-phase2-proof.jpg");
+        stubStorageUpload("https://cdn.snapfix.test/release3-phase6-proof.jpg");
         HttpResponse<String> proof = uploadProof(scenario.taskId(), scenario.workerToken());
         assertThat(proof.statusCode()).as(proof.body()).isEqualTo(200);
         return scenario;
     }
 
     private Scenario createAssignedScenario() throws Exception {
-        String citizenToken = registerAndLogin(uniqueEmail("r3p2-owner"), "CITIZEN");
-        String workerToken = registerAndLogin(uniqueEmail("r3p2-worker"), "WORKER");
-        String adminToken = registerAndLogin(uniqueEmail("r3p2-admin"), "ADMIN");
+        String citizenEmail = uniqueEmail("r3p6-owner");
+        String citizenToken = registerAndLogin(citizenEmail, "CITIZEN");
+        String workerEmail = uniqueEmail("r3p6-worker");
+        String workerToken = registerAndLogin(workerEmail, "WORKER");
+        String adminToken = registerAndLogin(uniqueEmail("r3p6-admin"), "ADMIN");
+        String citizenId = userRepository.findByEmail(citizenEmail).orElseThrow().getId().toString();
+        String workerId = userRepository.findByEmail(workerEmail).orElseThrow().getId().toString();
 
         completeWorkerProfile(workerToken, 12.9716, 77.5946);
         JsonNode report = objectMapper.readTree(createReport(
                 citizenToken,
-                "Release 3 verification task",
+                "Release 3 phase 6 rating task",
                 "ROAD_DAMAGE",
                 12.9716,
                 77.5946).body());
         JsonNode bid = objectMapper.readTree(placeBid(workerToken, report.get("id").asText()).body());
         approveBid(adminToken, bid.get("id").asText());
 
-        String taskId = taskRepository.findAll().get(0).getId().toString();
-        return new Scenario(taskId, report.get("citizenId").asText(), citizenToken, workerToken);
+        Task task = taskRepository.findAll().get(0);
+        return new Scenario(task.getId().toString(), citizenId, workerId, citizenToken, workerToken, adminToken);
+    }
+
+    private HttpResponse<String> rateWorker(String workerId, String taskId, int score, String comment, String accessToken) throws Exception {
+        return postJson(
+                "/workers/" + workerId + "/rating",
+                """
+                        {
+                          "taskId": "%s",
+                          "score": %s,
+                          "comment": "%s"
+                        }
+                        """.formatted(taskId, score, comment),
+                accessToken);
     }
 
     private void approveBid(String adminToken, String bidId) throws Exception {
@@ -231,7 +279,7 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
                           "reportId": "%s",
                           "bidAmount": 1500,
                           "durationEstimate": 4,
-                          "resourceNote": "verification tools"
+                          "resourceNote": "rating phase tools"
                         }
                         """.formatted(reportId),
                 workerToken);
@@ -261,7 +309,7 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
                           "email": "%s",
                           "password": "%s",
                           "role": "%s",
-                          "name": "Release 3 Phase 2 User"
+                          "name": "Release 3 Phase 6 User"
                         }
                         """.formatted(email, password, role),
                 null);
@@ -311,7 +359,7 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         writeTextPart(body, boundary, "lat", "12.9717");
         writeTextPart(body, boundary, "lng", "77.5947");
-        writeTextPart(body, boundary, "remarks", "Ready for citizen verification");
+        writeTextPart(body, boundary, "remarks", "Ready for rating phase");
         writeFilePart(body, boundary, "image", "proof.jpg");
         finishMultipart(body, boundary);
 
@@ -342,13 +390,13 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         body.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
     }
 
-    // private HttpResponse<String> get(String path, String accessToken) throws Exception {
-    //     HttpRequest request = HttpRequest.newBuilder(uri(path))
-    //             .header("Authorization", "Bearer " + accessToken)
-    //             .GET()
-    //             .build();
-    //     return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-    // }
+    private HttpResponse<String> get(String path, String accessToken) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(uri(path))
+                .header("Authorization", "Bearer " + accessToken)
+                .GET()
+                .build();
+        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    }
 
     private HttpResponse<String> patch(String path, String accessToken) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(uri(path))
@@ -359,11 +407,14 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
     }
 
     private HttpResponse<String> postNoBody(String path, String accessToken) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(uri(path))
-                .header("Authorization", "Bearer " + accessToken)
-                .POST(HttpRequest.BodyPublishers.noBody())
-                .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri(path))
+                .POST(HttpRequest.BodyPublishers.noBody());
+
+        if (accessToken != null) {
+            builder.header("Authorization", "Bearer " + accessToken);
+        }
+
+        return httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> postJson(String path, String body, String accessToken) throws Exception {
@@ -392,6 +443,12 @@ public class Release3Phase2VerificationIntegrationTest extends BaseIntegrationTe
         when(storageService.uploadImage(any(MultipartFile.class))).thenReturn(imageUrl);
     }
 
-    private record Scenario(String taskId, String citizenId, String citizenToken, String workerToken) {
+    private record Scenario(
+            String taskId,
+            String citizenId,
+            String workerId,
+            String citizenToken,
+            String workerToken,
+            String adminToken) {
     }
 }

@@ -17,6 +17,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import jakarta.validation.constraints.DecimalMin;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -41,6 +42,7 @@ public class Bid {
     private User worker;
 
     @Column(nullable = false)
+    @DecimalMin(value = "0.0", message = "Bidding amount must be greater than or equal to zero.")
     private BigDecimal bidAmount = BigDecimal.ZERO;
 
     @Column(nullable = false)

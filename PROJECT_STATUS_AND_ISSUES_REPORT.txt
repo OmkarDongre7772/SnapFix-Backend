@@ -637,3 +637,83 @@ Notifications:
 3. Begin payment and wallet transaction design.
 4. Add worker rating update after confirmed completion.
 5. Strongly consider Flyway or Liquibase before more schema changes.
+
+============================================================
+9. 2026-05-25 Release 3 Completion Verification Addendum
+============================================================
+
+Verification command run:
+.\mvnw.cmd test
+
+Result:
+Tests run: 63, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+
+Completion status:
+Release 3 is complete in the current backend codebase. Phase 1 through Phase 4
+remain complete, and the current code now also includes payment, wallet and
+rating flows covered by Release 3 Phase 5 and Phase 6 integration tests.
+
+Additional implemented scope verified:
+- Worker profile creation auto-creates a wallet with zero balance.
+- GET /workers/wallet returns the current worker wallet.
+- GET /workers/payments returns worker payment history.
+- Admin final task approval creates a pending payment for the approved bid
+  amount.
+- POST /admin/payments/{taskId}/release releases payment for completed work.
+- Payment release credits the worker wallet, creates a credit transaction,
+  sends a payment notification and moves the task to PAYMENT_RELEASED.
+- Duplicate payment release is blocked after the payment leaves PENDING.
+- POST /workers/{workerId}/rating lets the report citizen rate completed work.
+- Worker and admin rating attempts are blocked.
+- One rating per task is enforced.
+- Worker rating summary updates after rating submission.
+
+Additional Release 3 test files verified:
+- src/test/java/com/snapfix/integration/release3/Release3Phase5PaymentWalletIntegrationTest.java
+- src/test/java/com/snapfix/integration/release3/Release3Phase6RatingIntegrationTest.java
+
+------------------------------------------------------------
+
+Issue 44: Payment release needs duplicate-credit protection
+
+Root cause:
+Payment release is a money-moving command. If it can be repeated after a
+payment is released, worker wallets can be credited more than once for the same
+task.
+
+Impact:
+Wallet balances and transaction history would become incorrect.
+
+Fix:
+Release is allowed only while payment status is PENDING. Duplicate release
+attempts return conflict and do not create extra transactions or wallet credit.
+
+Learning:
+Money-moving endpoints should validate source state before mutating wallet,
+payment, task or transaction records.
+
+Status:
+Verified by Release 3 Phase 5 tests.
+
+------------------------------------------------------------
+
+Issue 45: Ratings need task-level uniqueness and lifecycle guards
+
+Root cause:
+Ratings affect worker averages and should represent completed work, not any
+arbitrary worker/citizen interaction.
+
+Impact:
+Duplicate or premature ratings could distort worker reputation.
+
+Fix:
+Only the report citizen can rate the worker for completed work, and one rating
+per task is enforced.
+
+Learning:
+Reputation data should be tied to a completed domain event and guarded like an
+audit record.
+
+Status:
+Verified by Release 3 Phase 6 tests.

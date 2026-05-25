@@ -1,6 +1,11 @@
 package com.snapfix.task.service;
 
+import com.snapfix.bid.entity.Bid;
+import com.snapfix.bid.entity.BidStatus;
+import com.snapfix.bid.repository.BidRepository;
+import com.snapfix.payment.repository.PaymentRepository;
 import com.snapfix.report.service.ReportService;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -10,6 +15,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import com.snapfix.auth.security.CustomUserDetails;
+import com.snapfix.payment.entity.Payment;
+import com.snapfix.payment.entity.PaymentStatus;
 import com.snapfix.report.entity.ReportStatus;
 import com.snapfix.task.dto.TaskResponse;
 import com.snapfix.task.entity.Task;
@@ -21,15 +28,19 @@ import jakarta.transaction.Transactional;
 @Service
 public class TaskService {
 
+    private final PaymentRepository paymentRepository;
+    private final BidRepository bidRepository;
     private final ReportService reportService;
     /*
      * BEAN INJECTION------------------
      */
     TaskRepository taskRepository;
 
-    public TaskService(TaskRepository taskRepository, ReportService reportService) {
+    public TaskService(TaskRepository taskRepository, ReportService reportService, BidRepository bidRepository, PaymentRepository paymentRepository) {
         this.taskRepository = taskRepository;
         this.reportService = reportService;
+        this.bidRepository = bidRepository;
+        this.paymentRepository = paymentRepository;
     }
 
     /*
@@ -55,7 +66,6 @@ public class TaskService {
         task.setRetryCount(task.getRetryCount() + 1); 
         task.setStatus(TaskStatus.IN_PROGRESS); 
         taskRepository.save(task);
-        //TODO: admin intervention logic pending
         return TaskResponse.mapTask(task);
     }
 
@@ -89,7 +99,14 @@ public class TaskService {
         task.setStatus(TaskStatus.COMPLETED);
         reportService.saveReport(task.getReport());
         taskRepository.save(task);
-        //TODO: Payment Pipeline
+        Bid approvedBid = bidRepository.findByReport_IdAndStatus(task.getReport().getId(), BidStatus.APPROVED)
+                .orElseThrow(() -> new IllegalStateException("Approved bid not found for task report"));
+        Payment payment = new Payment();
+        payment.setAmount(approvedBid.getBidAmount());
+        payment.setStatus(PaymentStatus.PENDING);
+        payment.setTask(task);
+        payment.setWorker(task.getWorker());
+        paymentRepository.save(payment);
         return TaskResponse.mapTask(task);
     }
 

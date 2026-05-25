@@ -7,10 +7,12 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
 
 import com.snapfix.proof.entity.Proof;
 import com.snapfix.task.entity.Task;
 
+@Repository
 public interface ProofRepository extends JpaRepository<Proof, UUID>{
     Optional<Proof> findByTask_Id(UUID taskId);
     boolean existsByTask_Id(UUID taskId);

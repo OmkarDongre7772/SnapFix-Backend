@@ -1,6 +1,6 @@
 # SnapFix - AI Assistant Context
 
-This file reflects the current backend state after Release 3 Phase 4 completion.
+This file reflects the current backend state after Release 3 completion.
 
 ## Current Development Stage
 
@@ -8,12 +8,12 @@ This file reflects the current backend state after Release 3 Phase 4 completion.
 | --- | --- |
 | Product | SnapFix Backend |
 | Architecture | Modular monolith |
-| Current release | Release 3 - Completion and Verification |
-| Status | Release 1, Release 2, and Release 3 Phase 1-4 backend scope complete |
+| Current release | Release 3 - Completion, Verification, Payment and Ratings |
+| Status | Release 1, Release 2, and Release 3 backend scope complete |
 | Latest full verification | `.\mvnw.cmd test` |
-| Latest local result |
-| Latest successful full result | 44 tests, 0 failures, 0 errors |
-| Current test suite size | 51 tests |
+| Latest local result | 63 tests, 0 failures, 0 errors |
+| Latest successful full result | 63 tests, 0 failures, 0 errors |
+| Current test suite size | 63 tests |
 
 ## Modules
 
@@ -28,6 +28,9 @@ admin
 task
 proof
 verification
+payment
+wallet
+rating
 storage
 geo
 common
@@ -37,7 +40,7 @@ config
 Future modules:
 
 ```text
-payment / wallet / rating / event / ai / analytics
+event / ai / analytics
 ```
 
 ## Rules To Preserve
@@ -89,6 +92,10 @@ payment / wallet / rating / event / ai / analytics
 | POST | `/workers/location` | WORKER |
 | GET | `/workers/reports/nearby` | WORKER |
 | GET | `/workers/tasks` | WORKER |
+| GET | `/workers/wallet` | WORKER |
+| GET | `/workers/payments` | WORKER |
+| POST | `/workers/{workerId}/rating` | Report CITIZEN |
+| GET | `/workers/{workerId}/rating` | Authenticated |
 
 ### Bids
 
@@ -111,6 +118,7 @@ payment / wallet / rating / event / ai / analytics
 | POST | `/admin/tasks/{taskId}/approve` | ADMIN |
 | POST | `/admin/tasks/{taskId}/reject` | ADMIN |
 | POST | `/admin/tasks/{taskId}/reassign` | ADMIN |
+| POST | `/admin/payments/{taskId}/release` | ADMIN |
 
 ### Tasks
 
@@ -181,6 +189,23 @@ payment / wallet / rating / event / ai / analytics
 - Admin rejection moves citizen-verified tasks to `REJECTED`.
 - Admin reassignment assigns incomplete work to a new worker and resets status to `ASSIGNED`.
 
+### Payment and Wallet
+
+- Worker profiles have one wallet.
+- Worker registration/profile completion ensures wallet creation.
+- Admin final approval creates a pending payment for the approved bid amount.
+- Admin payment release credits the wallet, records a transaction and moves task to `PAYMENT_RELEASED`.
+- Workers can view wallet balance and payment history.
+- Duplicate payment release is blocked once payment is not `PENDING`.
+
+### Rating
+
+- Report citizens can rate completed worker tasks.
+- Workers and admins cannot submit ratings.
+- One rating per task is enforced.
+- Worker average rating is recalculated after a rating is saved.
+- Worker rating summary is available by worker id.
+
 ### AdminActionLog
 
 - Written for admin approve/reject decisions.
@@ -232,6 +257,19 @@ ADMIN -> POST /admin/tasks/{taskId}/approve
   -> task COMPLETED
   -> report COMPLETED
   -> AdminActionLog written
+
+ADMIN -> POST /admin/payments/{taskId}/release
+  -> validate task COMPLETED
+  -> validate payment PENDING
+  -> credit worker wallet
+  -> task PAYMENT_RELEASED
+  -> payment RELEASED
+  -> wallet transaction written
+
+CITIZEN -> POST /workers/{workerId}/rating
+  -> validate report citizen owns completed task
+  -> save one rating per task
+  -> update worker rating average
 ```
 
 ## Test Coverage
@@ -245,13 +283,14 @@ Latest full command attempted:
 Latest local result:
 
 ```text
-Blocked: Testcontainers could not find a valid Docker environment.
+Tests run: 63, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
 ```
 
 Latest successful full result:
 
 ```text
-Tests run: 44, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 63, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -262,6 +301,8 @@ src/test/java/com/snapfix/integration/release2/Release2IntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase1ProofIntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase2VerificationIntegrationTest.java
 src/test/java/com/snapfix/integration/release3/Release3Phase3And4IntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase5PaymentWalletIntegrationTest.java
+src/test/java/com/snapfix/integration/release3/Release3Phase6RatingIntegrationTest.java
 ```
 
 Coverage includes:
@@ -274,6 +315,8 @@ Coverage includes:
 - Proof upload, proof ownership and `IN_PROGRESS -> PROOF_SUBMITTED`.
 - Citizen verification, rejection, worker retry count and max retry protection.
 - Admin task list/detail, final approval, rejection and reassignment.
+- Payment creation, release, wallet credit, history and duplicate protection.
+- Citizen rating, role blocking, lifecycle guards and rating summary update.
 
 ## Release 2 Bugs and Fixes
 
@@ -312,6 +355,16 @@ Coverage includes:
 | Final approval needed lifecycle guards | Approval could be requested before citizen verification | Require `VERIFIED_BY_CITIZEN` and report `IN_PROGRESS` |
 | Reassignment needed terminal-state protection | Completed tasks/reports should not be reassigned | Block completed work before changing worker |
 
+## Release 3 Phase 5 and 6 Bugs and Fixes
+
+| Bug | Cause | Fix |
+| --- | --- | --- |
+| Wallets needed a durable worker balance model | Profile fields alone cannot model credits/history | Add wallet and transaction entities |
+| Final approval needed payment handoff | Completion did not preserve approved bid amount for release | Create pending payment on final approval |
+| Duplicate payment release could double-credit wallets | Release needed status guard | Allow release only while payment is `PENDING` |
+| Rating could distort averages if repeated | Ratings need one task-level source of truth | Enforce one rating per task |
+| Rating needed lifecycle and ownership checks | Any actor should not rate any worker task | Require report citizen and completed task |
+
 ## Known Limitations
 
 - No Flyway/Liquibase yet.
@@ -319,12 +372,12 @@ Coverage includes:
 - Report location should get explicit GiST index.
 - Report ownership uses UUID field instead of full FK relationship.
 - Real-time notification push is deferred.
-- Release 3 payment, wallet and rating flows are not implemented.
 - Auto-verification scheduling exists but needs production policy review.
 
 ## Next Release
 
-Release 3 remaining work:
+Release 4 planned work:
 
-- Payment and wallet transactions.
-- Worker rating updates.
+- Event-driven architecture.
+- AI-assisted report intelligence.
+- Real-time notification delivery.

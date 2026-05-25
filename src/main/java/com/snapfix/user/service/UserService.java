@@ -20,6 +20,7 @@ import com.snapfix.user.entity.WorkerProfile;
 import com.snapfix.user.repository.CitizenProfileRepository;
 import com.snapfix.user.repository.UserRepository;
 import com.snapfix.user.repository.WorkerProfileRepository;
+import com.snapfix.wallet.dto.WalletResponse;
 
 import jakarta.transaction.Transactional;
 
@@ -66,10 +67,7 @@ public class UserService {
             throw new ProfileNotFoundException("Invalid role or profile not found");
         }
 
-        UserResponse response = new UserResponse();
-        response.setUserId(user.getId());
-        response.setEmail(user.getEmail());
-        response.setRole(user.getRole());
+        UserResponse response = UserResponse.mapToResponse(user);
         response.setProfile(profile);
         return response;
     }
@@ -134,7 +132,7 @@ public class UserService {
             dto.setSkills(new ArrayList<>(worker.getSkills()));
         }
         dto.setCompletedTasks(worker.getCompletedTasks());
-        dto.setWalletBalance(worker.getWalletBalance());
+        dto.setWallet(WalletResponse.mapToResponse(worker.getWallet()));
         dto.setAvailable(worker.isAvailable());
         if (worker.getCurrentLocation() != null) {
             dto.setLat(worker.getCurrentLocation().getY());

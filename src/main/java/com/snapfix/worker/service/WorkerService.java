@@ -2,10 +2,12 @@ package com.snapfix.worker.service;
 
 import com.snapfix.task.repository.TaskRepository;
 import com.snapfix.user.repository.WorkerProfileRepository;
+import com.snapfix.user.service.UserService;
+import com.snapfix.wallet.service.WalletService;
 import com.snapfix.user.repository.UserRepository;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
-import java.math.BigDecimal;
 
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -27,18 +29,23 @@ import jakarta.transaction.Transactional;
 @Service
 public class WorkerService {
 
+    private final UserService userService;
     private final TaskRepository taskRepository;
     private final WorkerProfileRepository workerProfileRepository;
     private final UserRepository userRepository;
     private final ReportService reportService;
+    private final WalletService walletService;
 
     public WorkerService(ReportService reportService,
             WorkerProfileRepository workerProfileRepository,
-            UserRepository userRepository, TaskRepository taskRepository) {
+            UserRepository userRepository, TaskRepository taskRepository, UserService userService,
+            WalletService walletService) {
         this.reportService = reportService;
         this.workerProfileRepository = workerProfileRepository;
         this.userRepository = userRepository;
         this.taskRepository = taskRepository;
+        this.userService = userService;
+        this.walletService = walletService;
     }
 
     // Utilizes Report Service getNearbyReports to get all the nearby reports from
@@ -83,7 +90,9 @@ public class WorkerService {
         }
         worker.setSkills(skills);
         worker.setCurrentLocation(GeoUtil.createPoint(location.getLatitude(), location.getLongitude()));
-        worker.setWalletBalance(BigDecimal.ZERO);
+        if (worker.getWallet() == null) {
+            worker.setWallet(walletService.createWallet(userService.getCurrentUser(userId)));
+        }
         worker.setAvailable(true);
 
         workerProfileRepository.save(worker);
@@ -167,10 +176,18 @@ public class WorkerService {
         return user.getId();
     }
 
+    public Optional<WorkerProfile> getWorkerProfileByWorker_Id(UUID workerId){
+        return workerProfileRepository.findByUser_Id(workerId);
+    }
+
     @PreAuthorize("hasRole('WORKER')")
     private WorkerProfile getCurrentWorkerProfile() {
         return workerProfileRepository.findById(getCurrentUserId())
                 .orElseThrow(() -> new IllegalArgumentException("Worker profile not found"));
+    }
+
+    public void saveProfile(WorkerProfile p) {
+        workerProfileRepository.save(p);
     }
 
 }

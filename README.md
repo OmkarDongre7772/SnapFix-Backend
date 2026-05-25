@@ -5,9 +5,9 @@
 ![Java](https://img.shields.io/badge/Java-21-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0.6-brightgreen)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-PostGIS-blue)
-![Tests](https://img.shields.io/badge/Tests-51_Total-blue)
+![Tests](https://img.shields.io/badge/Tests-63_Total-blue)
 ![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
-![Release](https://img.shields.io/badge/Release-v3.0.0_Phase_4-purple)
+![Release](https://img.shields.io/badge/Release-v3.0.0_Complete-purple)
 
 ---
 
@@ -40,7 +40,7 @@ Release 2 adds the worker marketplace flow:
 - The system creates an assigned task automatically
 - Assigned workers move tasks from `ASSIGNED` to `IN_PROGRESS`
 
-Release 3 Phase 1 through Phase 4 add completion verification and final admin review:
+Release 3 adds completion verification, final admin review, payment release and worker ratings:
 
 - Assigned workers upload proof of work with image, GPS point and remarks
 - Proof submission moves tasks from `IN_PROGRESS` to `PROOF_SUBMITTED`
@@ -49,10 +49,13 @@ Release 3 Phase 1 through Phase 4 add completion verification and final admin re
 - Worker retry moves rejected tasks back to `IN_PROGRESS`
 - Retry attempts increment retry count and enforce the max retry rule
 - Admins list, inspect, approve, reject and reassign tasks
+- Admin final approval creates a pending payment for the approved bid amount
+- Admins release completed-task payments into worker wallets
+- Citizens rate completed workers and worker rating summaries update
 
 This repository contains the Spring Boot backend for:
 
-# Release 3 - Completion and Verification
+# Release 3 - Completion, Verification, Payment and Ratings
 
 ---
 
@@ -86,9 +89,11 @@ The long-term goal is to evolve SnapFix from a modular monolith into a productio
 | Release 3 Phase 2 - Citizen Verification | Complete |
 | Release 3 Phase 3 - Worker Retry | Complete |
 | Release 3 Phase 4 - Admin Final Review and Reassignment | Complete |
-| Current Test Suite | 51 tests |
-| Latest Full Test Attempt | Blocked locally because Testcontainers could not find Docker |
-| Latest Successful Full Test Result | `.\mvnw.cmd test` - 44 tests passing |
+| Release 3 Phase 5 - Payment and Wallet | Complete |
+| Release 3 Phase 6 - Worker Ratings | Complete |
+| Current Test Suite | 63 tests |
+| Latest Full Test Attempt | `.\mvnw.cmd test` - 63 tests passing |
+| Latest Successful Full Test Result | `.\mvnw.cmd test` - 63 tests passing |
 
 ---
 
@@ -117,6 +122,9 @@ flowchart LR
     API --> Task[Task Module]
     API --> Proof[Proof Module]
     API --> Verification[Verification Module]
+    API --> Payment[Payment Module]
+    API --> Wallet[Wallet Module]
+    API --> Rating[Rating Module]
     API --> Storage[Storage Module]
     API --> Geo[Geo Module]
 
@@ -130,6 +138,9 @@ flowchart LR
     Task --> DB
     Proof --> DB
     Verification --> DB
+    Payment --> DB
+    Wallet --> DB
+    Rating --> DB
 
     Storage --> Cloudinary[(Cloudinary)]
 
@@ -190,6 +201,8 @@ timeline
 - Citizen verification and rejection for submitted proof
 - Worker retry flow with max retry protection
 - Admin final task review and reassignment
+- Payment release with worker wallet credit and payment history
+- Citizen worker ratings and rating summaries
 - Structured validation and exception responses
 - Dockerized local development
 - PostgreSQL/PostGIS integration tests using Testcontainers
@@ -236,6 +249,9 @@ timeline
 - Citizen proof verification and rejection
 - Retry count increment on worker retry with max retry protection
 - Admin task listing, detail, approval, rejection and reassignment
+- Worker wallet and payment history APIs
+- Admin completed-task payment release
+- Citizen rating submission and public worker rating summary
 - Structured validation and authorization error responses
 
 ---
@@ -309,6 +325,8 @@ flowchart TD
     K[Retry Count Increments]
     L[Admin Final Review]
     M[Task And Report Completed]
+    N[Admin Releases Payment]
+    O[Citizen Rates Worker]
 
     A --> B
     B --> C
@@ -323,6 +341,8 @@ flowchart TD
     K --> A
     H --> L
     L --> M
+    M --> N
+    M --> O
 ```
 
 ---
@@ -477,6 +497,9 @@ src/main/java/com/snapfix/
   task/          assigned task lifecycle
   proof/         worker proof-of-work uploads
   verification/  citizen proof verification and rejection
+  payment/       payment records and admin release
+  wallet/        worker wallet balances and transaction history
+  rating/        citizen worker ratings and summaries
   storage/       Cloudinary image upload abstraction
   geo/           PostGIS/JTS helpers
   common/        shared entities, exceptions and utilities
@@ -588,7 +611,7 @@ Docker Desktop must be running because integration tests use Testcontainers with
 Latest verified result:
 
 ```text
-Tests run: 50
+Tests run: 63
 Failures: 0
 Errors: 0
 Skipped: 0
@@ -662,6 +685,10 @@ lng         longitude
 | POST | `/workers/location` | WORKER | Update current GPS location |
 | GET | `/workers/reports/nearby` | WORKER | Reports near stored worker location |
 | GET | `/workers/tasks` | WORKER | View assigned tasks |
+| GET | `/workers/wallet` | WORKER | View own wallet |
+| GET | `/workers/payments` | WORKER | View own payment history |
+| POST | `/workers/{workerId}/rating` | Report CITIZEN | Rate a completed worker task |
+| GET | `/workers/{workerId}/rating` | Authenticated | View worker rating summary |
 
 ---
 
@@ -699,6 +726,7 @@ lng         longitude
 | POST | `/admin/tasks/{taskId}/approve` | ADMIN | Complete a citizen-verified task |
 | POST | `/admin/tasks/{taskId}/reject` | ADMIN | Reject a citizen-verified task |
 | POST | `/admin/tasks/{taskId}/reassign` | ADMIN | Reassign an incomplete task to another worker |
+| POST | `/admin/payments/{taskId}/release` | ADMIN | Release completed-task payment |
 
 ---
 
@@ -807,6 +835,9 @@ USING GIST(location);
 12. Retry is blocked when `retryCount >= 3`
 13. Admin approves a citizen-verified task with `POST /admin/tasks/{taskId}/approve`
 14. Admin approval moves the task and report to `COMPLETED`
+15. Admin releases payment with `POST /admin/payments/{taskId}/release`
+16. Released payment credits the worker wallet and moves the task to `PAYMENT_RELEASED`
+17. Report citizen rates the worker with `POST /workers/{workerId}/rating`
 
 ---
 
@@ -818,7 +849,6 @@ USING GIST(location);
 - WebSocket push notifications are planned for Release 4
 - `reports.location` still needs explicit GiST indexing for production-scale data
 - Some UUID relationships are not yet full foreign keys
-- Release 3 payment, wallet and rating workflows are not implemented
 - Verification auto-approval exists as a scheduled foundation but needs production policy review
 - Docker Compose smoke test still needs recording
 
@@ -850,6 +880,19 @@ USING GIST(location);
 | Final approval could be called in the wrong lifecycle state | Allow approval only after citizen verification |
 | Completed reports/tasks should not be reassigned | Block reassignment for completed work |
 | Retry count semantics were unclear | Count actual worker retry attempts, not citizen rejections |
+
+---
+
+# Release 3 Phase 5 and 6 Bugs and Fixes
+
+| Issue | Fix |
+|---|---|
+| Worker profiles needed a durable money boundary | Add one wallet per worker and expose `/workers/wallet` |
+| Final admin approval needed a payment record | Create a pending payment for the approved bid amount when the task completes |
+| Payment release needed idempotency protection | Block duplicate release once payment is no longer `PENDING` |
+| Worker earnings needed an audit trail | Create one wallet credit transaction per released payment |
+| Ratings needed ownership and lifecycle guards | Allow only the report citizen to rate completed work |
+| Rating duplication could distort worker averages | Enforce one rating per task and recompute worker average |
 
 ---
 
@@ -922,7 +965,7 @@ flowchart LR
 - Retry workflow
 - Payment and wallet
 - Worker ratings
-- Status: Phase 1 through Phase 4 complete; payment, wallet and ratings pending
+- Status: Complete
 
 ---
 

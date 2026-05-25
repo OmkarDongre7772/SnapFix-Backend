@@ -1,5 +1,6 @@
 package com.snapfix.auth.service;
 
+import com.snapfix.wallet.service.WalletService;
 import java.time.Instant;
 import java.util.List;
 
@@ -19,11 +20,11 @@ import com.snapfix.user.entity.WorkerProfile;
 import com.snapfix.user.repository.CitizenProfileRepository;
 import com.snapfix.user.repository.UserRepository;
 import com.snapfix.user.repository.WorkerProfileRepository;
-
 import jakarta.transaction.Transactional;
 
 @Service
 public class AuthService {
+    private final WalletService walletService;
     private final UserRepository userRepository;
     private final CitizenProfileRepository citizenRepo;
     private final WorkerProfileRepository workerRepo;
@@ -42,7 +43,7 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             JwtUtil jwtUtil,
             RefreshTokenRepository refreshTokenRepository,
-            TokenBlacklistService tokenBlacklistService) {
+            TokenBlacklistService tokenBlacklistService, WalletService walletService) {
         this.userRepository = userRepository;
         this.citizenRepo = citizenProfileRepository;
         this.workerRepo = workerProfileRepository;
@@ -50,6 +51,7 @@ public class AuthService {
         this.jwtUtil = jwtUtil;
         this.refreshTokenRepository = refreshTokenRepository;
         this.tokenBlacklistService = tokenBlacklistService;
+        this.walletService = walletService;
     }
 
     // Registeration
@@ -93,6 +95,7 @@ public class AuthService {
             WorkerProfile profile = new WorkerProfile();
             profile.setUser(user);
             profile.setName(request.getName());
+            profile.setWallet(walletService.createWallet(user));
             workerRepo.save(profile);
         }
 
